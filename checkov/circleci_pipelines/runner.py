@@ -31,15 +31,17 @@ class Runner(ImageReferencerMixin["dict[str, dict[str, Any] | list[dict[str, Any
     def included_paths(self) -> list[str]:
         return [".circleci"]
 
+    @staticmethod
     def _parse_file(
-        self, f: str, file_content: str | None = None
+        f: str, file_content: str | None = None
     ) -> tuple[dict[str, Any] | list[dict[str, Any]], list[tuple[int, str]]] | None:
-        if self.is_workflow_file(f):
-            return super()._parse_file(f)
+        if Runner.is_workflow_file(f):
+            return YamlRunner._parse_file(f)
 
         return None
 
-    def is_workflow_file(self, file_path: str) -> bool:
+    @staticmethod
+    def is_workflow_file(file_path: str) -> bool:
         """
         :return: True if the file mentioned is named config.yml/yaml in .circleci dir from included_paths(). Otherwise: False
         """
@@ -47,7 +49,7 @@ class Runner(ImageReferencerMixin["dict[str, dict[str, Any] | list[dict[str, Any
         return WORKFLOW_DIRECTORY in abspath and abspath.endswith(("config.yml", "config.yaml"))
 
     def get_resource(self, file_path: str, key: str, supported_entities: Iterable[str],
-                     start_line: int = -1, end_line: int = -1) -> str:
+                     start_line: int = -1, end_line: int = -1, graph_resource: bool = False) -> str:
         """
         supported resources for circleCI:
             jobs.*.docker[].{image: image, __startline__: __startline__, __endline__:__endline__}

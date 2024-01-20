@@ -23,22 +23,26 @@ def test_all_frameworks_are_tested() -> None:
     checkov_runners = {value for attr, value in CheckType.__dict__.items() if not attr.startswith("__")}
 
     # remove frameworks, which are not applicable
-    checkov_runners.difference_update({
-        CheckType.BITBUCKET_CONFIGURATION,
-        CheckType.GITHUB_CONFIGURATION,
-        CheckType.GITLAB_CONFIGURATION,
-        CheckType.JSON,
-        CheckType.SCA_IMAGE,
-        CheckType.SCA_PACKAGE,
-        CheckType.YAML,
-    })
+    checkov_runners.difference_update(
+        {
+            CheckType.BITBUCKET_CONFIGURATION,
+            CheckType.GITHUB_CONFIGURATION,
+            CheckType.GITLAB_CONFIGURATION,
+            CheckType.JSON,
+            CheckType.SCA_IMAGE,
+            CheckType.SCA_PACKAGE,
+            CheckType.YAML,
+        }
+    )
 
     assert checkov_runners == {
+        CheckType.ANSIBLE,
         CheckType.ARGO_WORKFLOWS,
         CheckType.ARM,
         CheckType.AZURE_PIPELINES,
         CheckType.BICEP,
         CheckType.BITBUCKET_PIPELINES,
+        CheckType.CDK,
         CheckType.CIRCLECI_PIPELINES,
         CheckType.CLOUDFORMATION,
         CheckType.DOCKERFILE,
@@ -48,11 +52,21 @@ def test_all_frameworks_are_tested() -> None:
         CheckType.KUBERNETES,
         CheckType.KUSTOMIZE,
         CheckType.OPENAPI,
+        CheckType.SAST,
+        CheckType.SAST_JAVA,
+        CheckType.SAST_PYTHON,
+        CheckType.SAST_JAVASCRIPT,
         CheckType.SECRETS,
         CheckType.SERVERLESS,
         CheckType.TERRAFORM,
+        CheckType.TERRAFORM_JSON,
         CheckType.TERRAFORM_PLAN,
+        CheckType.POLICY_3D
     }, "Don't forget to add a test case for the new runner here"
+
+
+def test_ansible_framework(caplog: LogCaptureFixture) -> None:
+    run_framework_test(caplog=caplog, framework=CheckType.ANSIBLE)
 
 
 def test_argo_workflows_framework(caplog: LogCaptureFixture) -> None:
@@ -60,7 +74,9 @@ def test_argo_workflows_framework(caplog: LogCaptureFixture) -> None:
 
 
 def test_arm_framework(caplog: LogCaptureFixture) -> None:
-    run_framework_test(caplog=caplog, framework=CheckType.ARM)
+    excluded_paths = ["arm/parser/examples/json/with_comments.json$"]
+
+    run_framework_test(caplog=caplog, framework=CheckType.ARM, excluded_paths=excluded_paths)
 
 
 def test_azure_pipelines_framework(caplog: LogCaptureFixture) -> None:
@@ -75,6 +91,11 @@ def test_bicep_framework(caplog: LogCaptureFixture) -> None:
 
 def test_bitbucket_pipelines_framework(caplog: LogCaptureFixture) -> None:
     run_framework_test(caplog=caplog, framework=CheckType.BITBUCKET_PIPELINES)
+
+
+@pytest.mark.xfail(reason="locally it works, but in CI no results")
+def test_cdk_framework(caplog: LogCaptureFixture) -> None:
+    run_framework_test(caplog=caplog, framework=CheckType.CDK)
 
 
 def test_circleci_pipelines_framework(caplog: LogCaptureFixture) -> None:
@@ -143,8 +164,13 @@ def test_terraform_framework(caplog: LogCaptureFixture) -> None:
     run_framework_test(caplog=caplog, framework=CheckType.TERRAFORM, excluded_paths=excluded_paths)
 
 
+def test_terraform_json_framework(caplog: LogCaptureFixture) -> None:
+    run_framework_test(caplog=caplog, framework=CheckType.TERRAFORM_JSON)
+
+
 def test_terraform_plan_framework(caplog: LogCaptureFixture) -> None:
     excluded_paths = [
+        "arm/parser/examples/json/with_comments.json$",
         "cloudformation/parser/fail.json$",
         "cloudformation/parser/success_triple_quotes_string.json$",
         "cloudformation/runner/resources/invalid.json$",

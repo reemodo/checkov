@@ -3,6 +3,7 @@ from __future__ import annotations
 import itertools
 from typing import List, Optional, Dict, Any, Tuple, TYPE_CHECKING
 
+from checkov.common.graph.checks_infra import debug
 from checkov.common.graph.checks_infra.enums import SolverType
 from checkov.common.graph.checks_infra.solvers.base_solver import BaseSolver
 from checkov.common.checks_infra.solvers.attribute_solvers.base_attribute_solver import BaseAttributeSolver
@@ -12,7 +13,7 @@ from checkov.common.checks_infra.solvers.filter_solvers.base_filter_solver impor
 from checkov.common.graph.graph_builder.graph_components.attribute_names import CustomAttributes
 
 if TYPE_CHECKING:
-    from networkx import DiGraph
+    from checkov.common.typing import LibraryGraph
 
 
 class ComplexConnectionSolver(BaseConnectionSolver):
@@ -52,6 +53,9 @@ class ComplexConnectionSolver(BaseConnectionSolver):
         passed = self.filter_duplicates(passed)
         failed = self.filter_duplicates(failed)
         unknown = self.filter_duplicates(unknown)
+
+        debug.complex_connection_block(solvers=self.solvers, operator=self.operator, passed_resources=passed, failed_resources=failed)
+
         return passed, failed, unknown
 
     def get_sorted_connection_solvers(self) -> List[BaseConnectionSolver]:
@@ -77,7 +81,7 @@ class ComplexConnectionSolver(BaseConnectionSolver):
         sorted_connection_solvers.extend(connection_solvers_with_filtered_resource_types)
         return sorted_connection_solvers
 
-    def run_attribute_solvers(self, graph_connector: DiGraph) -> \
+    def run_attribute_solvers(self, graph_connector: LibraryGraph) -> \
             Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
         attribute_solvers = [
             sub_solver

@@ -17,14 +17,6 @@ The main aspects of contributing new Policies are:
 
 ## Prerequisites
 
-### Video guide
-
-<div align="left">
-      <a href="https://www.youtube.com/watch?v=62F1-50g9D4">
-         <img src="https://img.youtube.com/vi/62F1-50g9D4/0.jpg" style="width:100%;">
-      </a>
-</div>
-
 ### Installation
 
 First, make sure you installed and configured Checkov correctly. If you are unsure, go back and read the [Installing Checkov documentation](https://www.checkov.io/2.Basics/Installing%20Checkov.html).
@@ -44,7 +36,7 @@ Let's assume we're trying to create a new AWS resource Check to ensure all of ou
        | (__| | | |  __/ (__|   < (_) \ V /
         \___|_| |_|\___|\___|_|\_\___/ \_/
 
-      By bridgecrew.io | version: ...
+      By Prisma Cloud | version: ...
 
       What action would you like to take? (add) [add]: add
 

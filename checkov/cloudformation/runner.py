@@ -5,6 +5,8 @@ import logging
 import os
 from typing import Type, Any, TYPE_CHECKING
 
+from typing_extensions import TypeAlias  # noqa[TC002]
+
 from checkov.cloudformation import cfn_utils
 from checkov.cloudformation.cfn_utils import create_definitions, build_definitions_context
 from checkov.cloudformation.checks.resource.registry import cfn_registry
@@ -17,14 +19,16 @@ from checkov.cloudformation.image_referencer.manager import CloudFormationImageR
 from checkov.cloudformation.parser.cfn_keywords import TemplateSections
 from checkov.common.checks_infra.registry import get_graph_checks_registry
 from checkov.common.graph.checks_infra.registry import BaseRegistry
-from checkov.common.graph.db_connectors.networkx.networkx_db_connector import NetworkxConnector
+from checkov.common.models.enums import CheckResult
+from checkov.common.typing import LibraryGraphConnector
 from checkov.common.graph.graph_builder import CustomAttributes
+from checkov.common.graph.graph_builder.consts import GraphSource
 from checkov.common.images.image_referencer import ImageReferencerMixin
 from checkov.common.output.extra_resource import ExtraResource
 from checkov.common.output.graph_record import GraphRecord
 from checkov.common.output.record import Record
 from checkov.common.output.report import Report, merge_reports, CheckType
-from checkov.common.runners.base_runner import BaseRunner, CHECKOV_CREATE_GRAPH
+from checkov.common.runners.base_runner import BaseRunner
 from checkov.common.util.secrets import omit_secret_value_from_checks
 from checkov.runner_filter import RunnerFilter
 
@@ -33,21 +37,23 @@ if TYPE_CHECKING:
     from checkov.common.checks_infra.registry import Registry
     from checkov.common.images.image_referencer import Image
 
+_CloudformationContext: TypeAlias = "dict[str, dict[str, Any]]"
+_CloudformationDefinitions: TypeAlias = "dict[str, dict[str, Any]]"
 
-class Runner(ImageReferencerMixin[None], BaseRunner[CloudformationGraphManager]):
+
+class Runner(ImageReferencerMixin[None], BaseRunner[_CloudformationDefinitions, _CloudformationContext, CloudformationGraphManager]):
     check_type = CheckType.CLOUDFORMATION  # noqa: CCE003  # a static attribute
 
     def __init__(
             self,
-            db_connector: NetworkxConnector | None = None,
-            source: str = "CloudFormation",
+            db_connector: LibraryGraphConnector | None = None,
+            source: str = GraphSource.CLOUDFORMATION,
             graph_class: Type[CloudformationLocalGraph] = CloudformationLocalGraph,
             graph_manager: CloudformationGraphManager | None = None,
             external_registries: list[BaseRegistry] | None = None
     ) -> None:
-        db_connector = db_connector or NetworkxConnector()
-
         super().__init__(file_extensions=['.json', '.yml', '.yaml', '.template'])
+        db_connector = db_connector or self.db_connector
         self.external_registries = [] if external_registries is None else external_registries
         self.graph_class = graph_class
         self.graph_manager: CloudformationGraphManager = (
@@ -55,8 +61,8 @@ class Runner(ImageReferencerMixin[None], BaseRunner[CloudformationGraphManager])
             if graph_manager is not None
             else CloudformationGraphManager(source=source, db_connector=db_connector)
         )
-        self.context: "dict[str, dict[str, Any]]" = {}
-        self.definitions: "dict[str, dict[str, Any]]" = {}  # type:ignore[assignment]  # need to check, how to support subclass differences
+        self.context: _CloudformationContext = {}
+        self.definitions: _CloudformationDefinitions = {}
         self.definitions_raw: "dict[str, list[tuple[int, str]]]" = {}
         self.graph_registry: "Registry" = get_graph_checks_registry(self.check_type)
 
@@ -83,25 +89,22 @@ class Runner(ImageReferencerMixin[None], BaseRunner[CloudformationGraphManager])
             if external_checks_dir:
                 for directory in external_checks_dir:
                     cfn_registry.load_external_checks(directory)
-
-                    if CHECKOV_CREATE_GRAPH:
-                        self.graph_registry.load_external_checks(directory)
+                    self.graph_registry.load_external_checks(directory)
 
             self.context = build_definitions_context(self.definitions, self.definitions_raw)
 
-            if CHECKOV_CREATE_GRAPH:
-                logging.info("creating CloudFormation graph")
-                local_graph = self.graph_manager.build_graph_from_definitions(self.definitions)
-                logging.info("Successfully created CloudFormation graph")
+            logging.info("creating CloudFormation graph")
+            local_graph = self.graph_manager.build_graph_from_definitions(self.definitions)
+            logging.info("Successfully created CloudFormation graph")
 
-                for vertex in local_graph.vertices:
-                    if vertex.block_type == BlockType.RESOURCE:
-                        report.add_resource(f'{vertex.path}:{vertex.id}')
-                self.graph_manager.save_graph(local_graph)
-                self.definitions, self.breadcrumbs = convert_graph_vertices_to_definitions(
-                    vertices=local_graph.vertices,
-                    root_folder=root_folder,
-                )
+            for vertex in local_graph.vertices:
+                if vertex.block_type == BlockType.RESOURCE:
+                    report.add_resource(f'{vertex.path}:{vertex.id}')
+            self.graph_manager.save_graph(local_graph)
+            self.definitions, self.breadcrumbs = convert_graph_vertices_to_definitions(
+                vertices=local_graph.vertices,
+                root_folder=root_folder,
+            )
 
         # TODO: replace with real graph rendering
         for cf_file in self.definitions.keys():
@@ -120,9 +123,8 @@ class Runner(ImageReferencerMixin[None], BaseRunner[CloudformationGraphManager])
         self.check_definitions(root_folder, runner_filter, report)
 
         # run graph checks
-        if CHECKOV_CREATE_GRAPH:
-            graph_report = self.get_graph_checks_report(root_folder, runner_filter)
-            merge_reports(report, graph_report)
+        graph_report = self.get_graph_checks_report(root_folder, runner_filter)
+        merge_reports(report, graph_report)
 
         if runner_filter.run_image_referencer:
             if files:
@@ -185,7 +187,7 @@ class Runner(ImageReferencerMixin[None], BaseRunner[CloudformationGraphManager])
                                         severity=check.severity
                                     )
 
-                                    if CHECKOV_CREATE_GRAPH and self.breadcrumbs:
+                                    if self.breadcrumbs:
                                         breadcrumb = self.breadcrumbs.get(record.file_path, {}).get(record.resource)
                                         if breadcrumb:
                                             record = GraphRecord(record, breadcrumb)
@@ -218,6 +220,18 @@ class Runner(ImageReferencerMixin[None], BaseRunner[CloudformationGraphManager])
                 entity_context = self.context[entity_file_abs_path][TemplateSections.RESOURCES][
                     entity_name
                 ]
+
+                skipped_check = next(
+                    (
+                        skipped_check
+                        for skipped_check in entity_context.get("skipped_checks", [])
+                        if skipped_check["id"] in (check.id, check.bc_id)
+                    ),
+                    None,
+                )
+                if skipped_check:
+                    check_result["result"] = CheckResult.SKIPPED
+                    check_result["suppress_comment"] = skipped_check.get("suppress_comment", "")
 
                 record = Record(
                     check_id=check.id,

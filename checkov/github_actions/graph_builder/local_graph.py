@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 from checkov.common.graph.graph_builder import CustomAttributes
+from checkov.common.graph.graph_builder.consts import GraphSource
 from checkov.common.graph.graph_builder.graph_components.block_types import BlockType
 from checkov.common.graph.graph_builder.graph_components.blocks import Block
 from checkov.common.runners.graph_builder.local_graph import ObjectLocalGraph
 from checkov.common.util.consts import START_LINE, END_LINE
+from checkov.common.util.data_structures_utils import pickle_deepcopy
 from checkov.github_actions.graph_builder.graph_components.resource_types import ResourceType
 from checkov.github_actions.utils import get_scannable_file_paths, parse_file
 
@@ -19,13 +20,13 @@ class GitHubActionsLocalGraph(ObjectLocalGraph):
     def __init__(self, definitions: dict[str | Path, dict[str, Any] | list[dict[str, Any]]]) -> None:
         super().__init__(definitions=definitions)
 
-        self.source = "GitHubActions"
+        self.source = GraphSource.GITHUB_ACTIONS
         self.job_steps_map: "dict[tuple[str, str], list[tuple[str, str]]]" = defaultdict(list)
 
     def _create_vertices(self) -> None:
         for file_path, definition in self.definitions.items():
             if not isinstance(definition, dict):
-                logging.warning(f"definition of file {file_path} has the wrong type {type(definition)}")
+                logging.debug(f"definition of file {file_path} has the wrong type {type(definition)}")
                 return
 
             file_path = str(file_path)
@@ -45,7 +46,7 @@ class GitHubActionsLocalGraph(ObjectLocalGraph):
             if name in (START_LINE, END_LINE):
                 continue
 
-            attributes = deepcopy(config)
+            attributes = pickle_deepcopy(config)
             attributes[CustomAttributes.RESOURCE_TYPE] = ResourceType.JOBS
 
             block_name = f"{ResourceType.JOBS}.{name}"
@@ -82,7 +83,7 @@ class GitHubActionsLocalGraph(ObjectLocalGraph):
                     # should not happen
                     continue
 
-                attributes = deepcopy(config)
+                attributes = pickle_deepcopy(config)
                 attributes[CustomAttributes.RESOURCE_TYPE] = ResourceType.STEPS
 
                 block_name = f"{ResourceType.JOBS}.{name}.{ResourceType.STEPS}.{idx + 1}"
@@ -104,11 +105,7 @@ class GitHubActionsLocalGraph(ObjectLocalGraph):
 
         if permissions is None:
             # if 'permissions' is not set in a file, then it is automatically 'write-all'
-            permissions = {
-                "permissions": "write-all",
-                START_LINE: 0,
-                END_LINE: 0,
-            }
+            permissions = "write-all"
 
         if not permissions or not isinstance(permissions, (str, dict)):
             return
@@ -121,9 +118,13 @@ class GitHubActionsLocalGraph(ObjectLocalGraph):
                 END_LINE: 0,
             }
         else:
-            config = permissions
+            config = {
+                "permissions": permissions,
+                START_LINE: permissions[START_LINE],
+                END_LINE: permissions[END_LINE],
+            }
 
-        attributes = deepcopy(config)
+        attributes = pickle_deepcopy(config)
         attributes[CustomAttributes.RESOURCE_TYPE] = ResourceType.PERMISSIONS
 
         block_name = ResourceType.PERMISSIONS
@@ -145,17 +146,21 @@ class GitHubActionsLocalGraph(ObjectLocalGraph):
 
         if isinstance(on, (str, list)):
             # to get the correct line numbers we would need to check the raw definition
-            config = {
+            config: "dict[str, Any]" = {
                 "on": on,
                 START_LINE: 0,
                 END_LINE: 0,
             }
         elif isinstance(on, dict):
-            config = on
+            config = {
+                "on": on,
+                START_LINE: on[START_LINE],
+                END_LINE: on[END_LINE],
+            }
         else:
             return
 
-        attributes = deepcopy(config)
+        attributes = pickle_deepcopy(config)
         attributes[CustomAttributes.RESOURCE_TYPE] = ResourceType.ON
 
         block_name = ResourceType.ON

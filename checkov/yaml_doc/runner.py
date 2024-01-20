@@ -9,7 +9,7 @@ from checkov.common.util.consts import START_LINE, END_LINE
 
 if TYPE_CHECKING:
     from checkov.common.checks.base_check_registry import BaseCheckRegistry
-    from checkov.common.graph.db_connectors.networkx.networkx_db_connector import NetworkxConnector
+    from checkov.common.typing import LibraryGraphConnector
     from checkov.common.runners.graph_builder.local_graph import ObjectLocalGraph
     from checkov.common.runners.graph_manager import ObjectGraphManager
 
@@ -19,7 +19,7 @@ class Runner(ObjectRunner):
 
     def __init__(
         self,
-        db_connector: NetworkxConnector | None = None,
+        db_connector: LibraryGraphConnector | None = None,
         source: str = "yaml",
         graph_class: type[ObjectLocalGraph] | None = None,
         graph_manager: ObjectGraphManager | None = None,
@@ -37,8 +37,9 @@ class Runner(ObjectRunner):
 
         return registry
 
+    @staticmethod
     def _parse_file(
-        self, f: str, file_content: str | None = None
+        f: str, file_content: str | None = None
     ) -> tuple[dict[str, Any] | list[dict[str, Any]], list[tuple[int, str]]] | None:
         return parse(f, file_content)
 
@@ -51,6 +52,8 @@ class Runner(ObjectRunner):
             start = result_config[0]["__startline__"] - 1
             end = result_config[len(result_config) - 1]["__endline__"]
         elif result_config and isinstance(result_config, dict):
+            if "__startline__" not in result_config or "__endline__" not in result_config:
+                return -1, -1
             start = result_config["__startline__"]
             end = result_config["__endline__"]
         return end, start
@@ -68,8 +71,9 @@ class Runner(ObjectRunner):
         """
         if not definition:
             return ""
-        for key, sub_name in definition.get(tag, {}).items():
-            if key in (START_LINE, END_LINE):
+        tag_value = definition.get(tag) or {}
+        for key, sub_name in tag_value.items():
+            if key in (START_LINE, END_LINE) or not isinstance(sub_name, dict):
                 continue
             if sub_name[START_LINE] <= start_line <= end_line <= sub_name[END_LINE]:
                 return str(key)

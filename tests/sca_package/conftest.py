@@ -1,14 +1,12 @@
 import os
 from pathlib import Path
 from unittest import mock
+from unittest.mock import MagicMock
 
-from mock.mock import MagicMock
 from typing import Dict, Any, List
 from pytest_mock import MockerFixture
 
 import pytest
-
-os.environ['CHECKOV_RUN_SCA_PACKAGE_SCAN_V2'] = 'false'
 
 from checkov.common.bridgecrew.bc_source import SourceType
 from checkov.common.bridgecrew.platform_integration import BcPlatformIntegration, bc_integration
@@ -17,6 +15,11 @@ from checkov.sca_package.runner import Runner
 from checkov.runner_filter import RunnerFilter
 
 EXAMPLES_DIR = Path(__file__).parent / "examples"
+
+@pytest.fixture(autouse=True)
+def mock_env_vars():
+    with mock.patch.dict(os.environ, {"CHECKOV_RUN_SCA_PACKAGE_SCAN_V2": "false"}):
+        yield
 
 
 @pytest.fixture()
@@ -259,7 +262,14 @@ def scan_result() -> List[Dict[str, Any]]:
                     "packageName": "django",
                     "packageVersion": "1.2",
                     "link": "https://nvd.nist.gov/vuln/detail/CVE-2019-19844",
-                    "riskFactors": ["Attack complexity: low", "Attack vector: network", "Critical severity", "Has fix"],
+                    "riskFactors": {"Attack complexity: low": {}, "Attack vector: network": {}, "Critical severity": {}, "Has fix": {}},
+                    "riskFactorsV2": {
+                        "Severity": "Critical",
+                        "HasFix": True,
+                        "DoS": False,
+                        "AttackVector": "network",
+                        "AttackComplexity": "low"
+                    },
                     "impactedVersions": ["<1.11.27"],
                     "publishedDate": "2019-12-18T20:15:00+01:00",
                     "discoveredDate": "2019-12-18T19:15:00Z",
@@ -275,13 +285,20 @@ def scan_result() -> List[Dict[str, Any]]:
                     "packageName": "django",
                     "packageVersion": "1.2",
                     "link": "https://nvd.nist.gov/vuln/detail/CVE-2016-6186",
-                    "riskFactors": [
-                        "Attack complexity: low",
-                        "Attack vector: network",
-                        "Exploit exists",
-                        "Has fix",
-                        "Medium severity",
-                    ],
+                    "riskFactors": {
+                        "Attack complexity: low": {},
+                        "Attack vector: network": {},
+                        "Medium severity": {},
+                        "Has fix": {},
+                        "Exploit exists": {}},
+                    "riskFactorsV2": {
+                        "Severity": "Medium",
+                        "HasFix": True,
+                        "DoS": False,
+                        "AttackVector": "network",
+                        "AttackComplexity": "low",
+                        "Exploit exists": True
+                    },
                     "impactedVersions": ["<=1.8.13"],
                     "publishedDate": "2016-08-05T17:59:00+02:00",
                     "discoveredDate": "2016-08-05T15:59:00Z",
@@ -297,7 +314,14 @@ def scan_result() -> List[Dict[str, Any]]:
                     "packageName": "django",
                     "packageVersion": "1.2",
                     "link": "https://nvd.nist.gov/vuln/detail/CVE-2016-7401",
-                    "riskFactors": ["High severity", "Attack complexity: low", "Attack vector: network", "Has fix"],
+                    "riskFactors": {"Attack complexity: low": {}, "Attack vector: network": {}, "High severity": {}, "Has fix": {}},
+                    "riskFactorsV2": {
+                        "Severity": "High",
+                        "HasFix": True,
+                        "DoS": False,
+                        "AttackVector": "network",
+                        "AttackComplexity": "low"
+                    },
                     "impactedVersions": ["<=1.8.14"],
                     "publishedDate": "2016-10-03T20:59:00+02:00",
                     "discoveredDate": "2016-10-03T18:59:00Z",
@@ -313,13 +337,14 @@ def scan_result() -> List[Dict[str, Any]]:
                     "packageName": "django",
                     "packageVersion": "1.2",
                     "link": "https://nvd.nist.gov/vuln/detail/CVE-2021-33203",
-                    "riskFactors": [
-                        "Attack complexity: low",
-                        "Attack vector: network",
-                        "Has fix",
-                        "Medium severity",
-                        "Recent vulnerability",
-                    ],
+                    "riskFactors": {"Attack complexity: low": {}, "Attack vector: network": {}, "High severity": {}, "Has fix": {}},
+                    "riskFactorsV2": {
+                        "Severity": "High",
+                        "HasFix": True,
+                        "DoS": False,
+                        "AttackVector": "network",
+                        "AttackComplexity": "low"
+                    },
                     "impactedVersions": ["<2.2.24"],
                     "publishedDate": "2021-06-08T20:15:00+02:00",
                     "discoveredDate": "2021-06-08T18:15:00Z",
@@ -335,13 +360,15 @@ def scan_result() -> List[Dict[str, Any]]:
                     "packageName": "flask",
                     "packageVersion": "0.6",
                     "link": "https://nvd.nist.gov/vuln/detail/CVE-2019-1010083",
-                    "riskFactors": [
-                        "Attack complexity: low",
-                        "Attack vector: network",
-                        "DoS",
-                        "Has fix",
-                        "High severity",
-                    ],
+                    "riskFactors": {"Attack complexity: low": {}, "Attack vector: network": {}, "High severity": {},
+                                    "Has fix": {}, "Dos": {}},
+                    "riskFactorsV2": {
+                        "Severity": "High",
+                        "HasFix": True,
+                        "DoS": True,
+                        "AttackVector": "network",
+                        "AttackComplexity": "low"
+                    },
                     "impactedVersions": ["<1.0"],
                     "publishedDate": "2019-07-17T16:15:00+02:00",
                     "discoveredDate": "2019-07-17T14:15:00Z",
@@ -357,13 +384,15 @@ def scan_result() -> List[Dict[str, Any]]:
                     "packageName": "flask",
                     "packageVersion": "0.6",
                     "link": "https://nvd.nist.gov/vuln/detail/CVE-2018-1000656",
-                    "riskFactors": [
-                        "Attack complexity: low",
-                        "Attack vector: network",
-                        "DoS",
-                        "Has fix",
-                        "High severity",
-                    ],
+                    "riskFactors": {"Attack complexity: low": {}, "Attack vector: network": {}, "High severity": {},
+                                    "Has fix": {}, "Dos": {}},
+                    "riskFactorsV2": {
+                        "Severity": "High",
+                        "HasFix": True,
+                        "DoS": True,
+                        "AttackVector": "network",
+                        "AttackComplexity": "low"
+                    },
                     "impactedVersions": ["<0.12.3"],
                     "publishedDate": "2018-08-20T21:31:00+02:00",
                     "discoveredDate": "2018-08-20T19:31:00Z",
@@ -474,13 +503,15 @@ def scan_result() -> List[Dict[str, Any]]:
                     "packageName": "golang.org/x/crypto",
                     "packageVersion": "v0.0.1",
                     "link": "https://nvd.nist.gov/vuln/detail/CVE-2020-29652",
-                    "riskFactors": [
-                        "Has fix",
-                        "High severity",
-                        "Attack complexity: low",
-                        "Attack vector: network",
-                        "DoS",
-                    ],
+                    "riskFactors": {"Attack complexity: low": {}, "Attack vector: network": {}, "High severity": {},
+                                    "Has fix": {}, "Dos": {}},
+                    "riskFactorsV2": {
+                        "Severity": "High",
+                        "HasFix": True,
+                        "DoS": True,
+                        "AttackVector": "network",
+                        "AttackComplexity": "low"
+                    },
                     "impactedVersions": ["<v0.0.2"],
                     "publishedDate": "2020-12-17T06:15:00+01:00",
                     "discoveredDate": "2020-12-17T05:15:00Z",
@@ -496,7 +527,15 @@ def scan_result() -> List[Dict[str, Any]]:
                     "packageName": "github.com/dgrijalva/jwt-go",
                     "packageVersion": "v3.2.0",
                     "link": "https://nvd.nist.gov/vuln/detail/CVE-2020-26160",
-                    "riskFactors": ["High severity", "Attack complexity: low", "Attack vector: network", "Has fix"],
+                    "riskFactors": {"Attack complexity: low": {}, "Attack vector: network": {}, "High severity": {},
+                                    "Has fix": {}, "Dos": {}},
+                    "riskFactorsV2": {
+                        "Severity": "High",
+                        "HasFix": True,
+                        "DoS": True,
+                        "AttackVector": "network",
+                        "AttackComplexity": "low"
+                    },
                     "impactedVersions": ["<v4.0.0-preview1"],
                     "publishedDate": "2020-09-30T20:15:00+02:00",
                     "discoveredDate": "2020-09-30T18:15:00Z",

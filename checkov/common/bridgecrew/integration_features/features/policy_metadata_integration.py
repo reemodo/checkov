@@ -4,6 +4,7 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
+from checkov.common.bridgecrew.check_type import CheckType
 from checkov.common.checks_infra.registry import get_graph_checks_registry
 from checkov.common.bridgecrew.integration_features.base_integration_feature import BaseIntegrationFeature
 from checkov.common.bridgecrew.platform_integration import bc_integration
@@ -23,6 +24,7 @@ class PolicyMetadataIntegration(BaseIntegrationFeature):
         self.check_metadata: dict[str, Any] = {}
         self.bc_to_ckv_id_mapping: dict[str, str] = {}
         self.pc_to_ckv_id_mapping: dict[str, str] = {}
+        self.ckv_id_to_source_incident_id_mapping: dict[str, str] = {}
         self.severity_key = 'severity'
         self.filtered_policy_ids: list[str] = []
 
@@ -47,7 +49,12 @@ class PolicyMetadataIntegration(BaseIntegrationFeature):
 
             all_checks = BaseCheckRegistry.get_all_registered_checks()
 
-            registries = ['terraform', 'cloudformation', 'kubernetes', 'bicep', 'terraform_plan']
+            if self.config and self.config.framework and "all" not in self.config.framework:
+                registries = self.config.framework
+                if CheckType.TERRAFORM_PLAN in registries and CheckType.TERRAFORM not in registries:
+                    registries.append(CheckType.TERRAFORM)
+            else:
+                registries = (CheckType.TERRAFORM, CheckType.CLOUDFORMATION, CheckType.KUBERNETES, CheckType.BICEP, CheckType.TERRAFORM_PLAN)
 
             for r in registries:
                 registry = get_graph_checks_registry(r)
@@ -111,6 +118,9 @@ class PolicyMetadataIntegration(BaseIntegrationFeature):
     def get_ckv_id_from_pc_id(self, pc_id: str) -> str | None:
         return self.pc_to_ckv_id_mapping.get(pc_id)
 
+    def get_source_incident_id_from_ckv_id(self, ckv_id: str) -> str | None:
+        return self.ckv_id_to_source_incident_id_mapping.get(ckv_id)
+
     def _handle_public_metadata(self, check_metadata: dict[str, Any]) -> None:
         guidelines = check_metadata['guidelines']
         self.bc_to_ckv_id_mapping = check_metadata['idMapping']
@@ -144,6 +154,9 @@ class PolicyMetadataIntegration(BaseIntegrationFeature):
                 pc_policy_id = custom_policy.get('pcPolicyId')
                 if pc_policy_id:
                     self.pc_to_ckv_id_mapping[pc_policy_id] = custom_policy['id']
+                source_incident_id = custom_policy.get('sourceIncidentId')
+                if source_incident_id:
+                    self.ckv_id_to_source_incident_id_mapping[custom_policy['id']] = source_incident_id
 
     def _handle_customer_prisma_policy_metadata(self, prisma_policy_metadata: list[dict[str, Any]]) -> None:
         if isinstance(prisma_policy_metadata, list):
@@ -154,12 +167,43 @@ class PolicyMetadataIntegration(BaseIntegrationFeature):
                     ckv_id = self.get_ckv_id_from_pc_id(pc_id)
                     if ckv_id:
                         self.filtered_policy_ids.append(ckv_id)
+            self._add_ckv_id_for_filtered_cloned_checks()
+
+    def _add_ckv_id_for_filtered_cloned_checks(self) -> None:
+        """
+        Filtered checks are the policies that are returned by --policy-metadata-filter.
+        Cloned checks are policies that have modified metadata in Prisma (severity, title etc).
+        Filtered checks do not have a definition if they are cloned, instead they have a sourceIncidentId
+        which corresponds to the BC ID of the original source check.
+        This method adds the CKV ID for that source check to the list of filtered policies to ensure it is run.
+        Example:
+            Input:
+                filtered_policy_ids = [ "org_AWS_1609123441" ]
+                ckv_id_to_source_incident_id_mapping =  { "org_AWS_1609123441": "BC__AWS_GENERAL_123" }
+                bc_id_to_ckv_id_mapping = { "BC__AWS_GENERAL_123": "CKV_AWS_123" }
+            Output:
+                filtered_policy_ids = [ "org_AWS_1609123441", "CKV_AWS_123" ]
+        """
+        ckv_ids = []
+        for policy_id in self.filtered_policy_ids:
+            source_bc_id = self.get_source_incident_id_from_ckv_id(policy_id)
+            if not source_bc_id:
+                continue
+            ckv_id = self.get_ckv_id_from_bc_id(source_bc_id)
+            if not ckv_id:
+                continue
+            ckv_ids.append(ckv_id)
+        self.filtered_policy_ids += ckv_ids
 
     def pre_runner(self, runner: _BaseRunner) -> None:
         # not used
         pass
 
     def post_runner(self, scan_reports: Report) -> None:
+        # not used
+        pass
+
+    def post_scan(self, merged_reports: list[Report]) -> None:
         # not used
         pass
 

@@ -4,14 +4,18 @@ import json
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, List, Optional, Tuple
+from typing import Any, List
 
 import hcl2
-
 
 _FUNCTION_NAME_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
 
 _ARG_VAR_PATTERN = re.compile(r"[a-zA-Z_]+(\.[a-zA-Z_]+)+")
+
+TERRAFORM_NESTED_MODULE_PATH_PREFIX = '([{'
+TERRAFORM_NESTED_MODULE_PATH_ENDING = '}])'
+TERRAFORM_NESTED_MODULE_INDEX_SEPARATOR = '#*#'
+TERRAFORM_NESTED_MODULE_PATH_SEPARATOR_LENGTH = 3
 
 
 @dataclass
@@ -52,11 +56,42 @@ class ParserMode(Enum):
         return str(self.value)
 
 
+def is_acceptable_module_param(value: Any) -> bool:
+    """
+    This function determines if a value should be passed to a module as a parameter. We don't want to pass
+    unresolved var, local or module references because they can't be resolved from the module, so they need
+    to be resolved prior to being passed down.
+    """
+    value_type = type(value)
+    if value_type is dict:
+        for k, v in value.items():
+            if not is_acceptable_module_param(v) or not is_acceptable_module_param(k):
+                return False
+        return True
+    if value_type is set or value_type is list:
+        for v in value:
+            if not is_acceptable_module_param(v):
+                return False
+        return True
+
+    if value_type is not str:
+        return True
+
+    for vbm in find_var_blocks(value):
+        if vbm.is_simple_var():
+            return False
+    return True
+
+
 def find_var_blocks(value: str) -> List[VarBlockMatch]:
     """
     Find and return all the var blocks within a given string. Order is important and may contain portions of
     one another.
     """
+
+    if "$" not in value:
+        # not relevant, typically just a normal string value
+        return []
 
     to_return: List[VarBlockMatch] = []
 
@@ -301,52 +336,3 @@ def to_string(value: Any) -> str:
     elif value is False:
         return "false"
     return str(value)
-
-
-def get_current_module_index(full_path: str) -> Optional[int]:
-    hcl_index = None
-    tf_index = None
-    if '.hcl' in full_path:
-        hcl_index = full_path.index('.hcl') + 4  # len('.hcl')
-    if '.tf' in full_path:
-        tf_index = full_path.index('.tf') + 3    # len('.tf')
-    if hcl_index and tf_index:
-        # returning the index of the first file
-        return min(hcl_index, tf_index)
-    if hcl_index:
-        return hcl_index
-    return tf_index
-
-
-def is_nested(full_path: str) -> bool:
-    return '[' in full_path
-
-
-def get_tf_definition_key(nested_module: str, module_name: str, module_index: Any, nested_key: str = '') -> str:
-    return f"{nested_module}[{module_name}#{module_index}{nested_key}]"
-
-
-def get_tf_definition_key_from_module_dependency(path: str, module_dependency: str, module_dependency_num: str) -> str:
-    if not module_dependency:
-        return path
-    if not is_nested(module_dependency):
-        return f"{path}[{module_dependency}#{module_dependency_num}]"
-    module_index = get_current_module_index(module_dependency)
-    return f"{path}[{module_dependency[:module_index]}#{module_dependency_num}{module_dependency[module_index:]}]"
-
-
-def get_module_from_full_path(file_path: str) -> Tuple[Optional[str], Optional[str]]:
-    if not is_nested(file_path):
-        return None, None
-    tmp_path = file_path[file_path.index('[') + 1: -1]
-    if is_nested(tmp_path):
-        module = get_abs_path(tmp_path) + tmp_path[tmp_path.index('['):]
-        index = tmp_path[tmp_path.index('#') + 1:tmp_path.index('[')]
-    else:
-        module = get_abs_path(tmp_path)
-        index = tmp_path[tmp_path.index('#') + 1:]
-    return module, index
-
-
-def get_abs_path(file_path: str) -> str:
-    return file_path[:get_current_module_index(file_path)]

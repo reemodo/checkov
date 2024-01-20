@@ -1,10 +1,14 @@
-from networkx import DiGraph
+from unittest import mock
 
+import pytest
 from checkov.common.images.image_referencer import Image
 from checkov.terraform.image_referencer.manager import TerraformImageReferencerManager
+from tests.graph_utils.utils import set_graph_by_graph_framework, add_vertices_to_graph_by_graph_framework, \
+    GRAPH_FRAMEWORKS
 
 
-def test_extract_images_from_resources():
+@pytest.mark.parametrize("graph_framework", GRAPH_FRAMEWORKS)
+def test_extract_images_from_resources(graph_framework):
     # given
     aws_resource = {
         "file_path_": "/ecs.tf",
@@ -29,7 +33,7 @@ def test_extract_images_from_resources():
         "container_configuration": {
             "container_image_names": ["python:3.9-alpine"],
             "container_registries": {
-                "password": "myPassword",
+                "password": "myPassword",  # checkov:skip=CKV_SECRET_6 test secret
                 "registry_server": "myContainerRegistry.azurecr.io",
                 "user_name": "myUserName",
             },
@@ -50,13 +54,14 @@ def test_extract_images_from_resources():
         },
         "resource_type": "google_cloud_run_service",
     }
-    graph = DiGraph()
-    graph.add_node(1, **aws_resource)
-    graph.add_node(2, **azure_resource)
-    graph.add_node(3, **gcp_resource)
+    graph = set_graph_by_graph_framework(graph_framework)
+    add_vertices_to_graph_by_graph_framework(graph_framework, aws_resource, graph, 1, 'first')
+    add_vertices_to_graph_by_graph_framework(graph_framework, azure_resource, graph, 2, '2')
+    add_vertices_to_graph_by_graph_framework(graph_framework, gcp_resource, graph, 3, '3')
 
     # when
-    images = TerraformImageReferencerManager(graph_connector=graph).extract_images_from_resources()
+    with mock.patch.dict('os.environ', {'CHECKOV_GRAPH_FRAMEWORK': graph_framework}):
+        images = TerraformImageReferencerManager(graph_connector=graph).extract_images_from_resources()
 
     # then
     assert images == [
@@ -76,3 +81,4 @@ def test_extract_images_from_resources():
             related_resource_id="/cloud_run.tf:None",
         ),
     ]
+

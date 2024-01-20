@@ -1,22 +1,27 @@
 import os
 from pathlib import Path
 from unittest import mock
-
-from mock.mock import MagicMock
-from typing import Dict, Any, List
-from pytest_mock import MockerFixture
+from unittest.mock import MagicMock
+from typing import Dict, Any, List, Generator
 
 import pytest
-
-os.environ['CHECKOV_RUN_SCA_PACKAGE_SCAN_V2'] = 'true'
+from pytest_mock import MockerFixture
 
 from checkov.common.bridgecrew.bc_source import SourceType
 from checkov.common.bridgecrew.platform_integration import BcPlatformIntegration, bc_integration
 from checkov.common.output.report import Report
 from checkov.sca_package_2.runner import Runner
+from checkov.sca_package_2.output import create_cli_license_violations_table, create_cli_output
 from checkov.runner_filter import RunnerFilter
+from checkov.common.sca.commons import get_package_alias
+from checkov.common.sca.output import create_report_cve_record, create_report_license_record
 
 EXAMPLES_DIR = Path(__file__).parent / "examples"
+
+@pytest.fixture(autouse=True)
+def mock_env_vars():
+    with mock.patch.dict(os.environ, {"CHECKOV_RUN_SCA_PACKAGE_SCAN_V2": "true"}):
+        yield
 
 
 @pytest.fixture()
@@ -36,27 +41,30 @@ def mock_bc_integration() -> BcPlatformIntegration:
 @pytest.fixture(scope='package')
 def scan_result_2() -> Dict[str, Dict[str, Any]]:
     return {
-        "/path/to/requirements.txt": {
-            "repository": "/path/to/requirements.txt",
+        "/requirements.txt": {
+            "repository": "/requirements.txt",
             "passed": True,
             "packages": [
                 {
                     "type": "python",
                     "name": "requests",
                     "version": "2.26.0",
-                    "path": "/path/to/requirements.txt",
+                    "path": "/requirements.txt",
+                    "registry": "https://pypi.python.org/",
                 },
                 {
                     "type": "python",
                     "name": "django",
                     "version": "1.2",
-                    "path": "/path/to/requirements.txt",
+                    "path": "/requirements.txt",
+                    "registry": "https://pypi.python.org/"
                 },
                 {
                     "type": "python",
                     "name": "flask",
                     "version": "0.6",
-                    "path": "/path/to/requirements.txt",
+                    "path": "/requirements.txt",
+                    "registry": "https://pypi.python.org/"
                 },
             ],
             "complianceIssues": None,
@@ -72,7 +80,8 @@ def scan_result_2() -> Dict[str, Dict[str, Any]]:
                     "packageName": "django",
                     "packageVersion": "1.2",
                     "link": "https://nvd.nist.gov/vuln/detail/CVE-2019-19844",
-                    "riskFactors": ["Attack complexity: low", "Attack vector: network", "Critical severity", "Has fix"],
+                    'riskFactors': {'Critical severity': {}, 'Attack complexity: low': {}, 'Has fix': {}, 'Remote execution': {}, 'Attack vector: network': {}},
+                    'riskFactorsV2': {'Severity': 'Critical', 'HasFix': True, 'DoS': False, 'AttackComplexity': 'low', 'AttackVector': 'network', 'RemoteExecution': True},
                     "impactedVersions": ["<1.11.27"],
                     "publishedDate": "2019-12-18T20:15:00+01:00",
                     "discoveredDate": "2019-12-18T19:15:00Z",
@@ -88,13 +97,8 @@ def scan_result_2() -> Dict[str, Dict[str, Any]]:
                     "packageName": "django",
                     "packageVersion": "1.2",
                     "link": "https://nvd.nist.gov/vuln/detail/CVE-2016-6186",
-                    "riskFactors": [
-                        "Attack complexity: low",
-                        "Attack vector: network",
-                        "Exploit exists",
-                        "Has fix",
-                        "Medium severity",
-                    ],
+                    'riskFactors': {'Critical severity': {}, 'Attack complexity: low': {}, 'Has fix': {}, 'Remote execution': {}, 'Attack vector: network': {}},
+                    'riskFactorsV2': {'Severity': 'Critical', 'HasFix': True, 'DoS': False, 'AttackComplexity': 'low', 'AttackVector': 'network', 'RemoteExecution': True},
                     "impactedVersions": ["<=1.8.13"],
                     "publishedDate": "2016-08-05T17:59:00+02:00",
                     "discoveredDate": "2016-08-05T15:59:00Z",
@@ -110,7 +114,8 @@ def scan_result_2() -> Dict[str, Dict[str, Any]]:
                     "packageName": "django",
                     "packageVersion": "1.2",
                     "link": "https://nvd.nist.gov/vuln/detail/CVE-2016-7401",
-                    "riskFactors": ["High severity", "Attack complexity: low", "Attack vector: network", "Has fix"],
+                    'riskFactors': {'Critical severity': {}, 'Attack complexity: low': {}, 'Has fix': {}, 'Remote execution': {}, 'Attack vector: network': {}},
+                    'riskFactorsV2': {'Severity': 'Critical', 'HasFix': True, 'DoS': False, 'AttackComplexity': 'low', 'AttackVector': 'network', 'RemoteExecution': True},
                     "impactedVersions": ["<=1.8.14"],
                     "publishedDate": "2016-10-03T20:59:00+02:00",
                     "discoveredDate": "2016-10-03T18:59:00Z",
@@ -126,13 +131,8 @@ def scan_result_2() -> Dict[str, Dict[str, Any]]:
                     "packageName": "django",
                     "packageVersion": "1.2",
                     "link": "https://nvd.nist.gov/vuln/detail/CVE-2021-33203",
-                    "riskFactors": [
-                        "Attack complexity: low",
-                        "Attack vector: network",
-                        "Has fix",
-                        "Medium severity",
-                        "Recent vulnerability",
-                    ],
+                    'riskFactors': {'Critical severity': {}, 'Attack complexity: low': {}, 'Has fix': {}, 'Remote execution': {}, 'Attack vector: network': {}},
+                    'riskFactorsV2': {'Severity': 'Critical', 'HasFix': True, 'DoS': False, 'AttackComplexity': 'low', 'AttackVector': 'network', 'RemoteExecution': True},
                     "impactedVersions": ["<2.2.24"],
                     "publishedDate": "2021-06-08T20:15:00+02:00",
                     "discoveredDate": "2021-06-08T18:15:00Z",
@@ -148,13 +148,8 @@ def scan_result_2() -> Dict[str, Dict[str, Any]]:
                     "packageName": "flask",
                     "packageVersion": "0.6",
                     "link": "https://nvd.nist.gov/vuln/detail/CVE-2019-1010083",
-                    "riskFactors": [
-                        "Attack complexity: low",
-                        "Attack vector: network",
-                        "DoS",
-                        "Has fix",
-                        "High severity",
-                    ],
+                    'riskFactors': {'Critical severity': {}, 'Attack complexity: low': {}, 'Has fix': {}, 'Remote execution': {}, 'Attack vector: network': {}},
+                    'riskFactorsV2': {'Severity': 'Critical', 'HasFix': True, 'DoS': False, 'AttackComplexity': 'low', 'AttackVector': 'network', 'RemoteExecution': True},
                     "impactedVersions": ["<1.0"],
                     "publishedDate": "2019-07-17T16:15:00+02:00",
                     "discoveredDate": "2019-07-17T14:15:00Z",
@@ -170,13 +165,8 @@ def scan_result_2() -> Dict[str, Dict[str, Any]]:
                     "packageName": "flask",
                     "packageVersion": "0.6",
                     "link": "https://nvd.nist.gov/vuln/detail/CVE-2018-1000656",
-                    "riskFactors": [
-                        "Attack complexity: low",
-                        "Attack vector: network",
-                        "DoS",
-                        "Has fix",
-                        "High severity",
-                    ],
+                    'riskFactors': {'Critical severity': {}, 'Attack complexity: low': {}, 'Has fix': {}, 'Remote execution': {}, 'Attack vector: network': {}},
+                    'riskFactorsV2': {'Severity': 'Critical', 'HasFix': True, 'DoS': False, 'AttackComplexity': 'low', 'AttackVector': 'network', 'RemoteExecution': True},
                     "impactedVersions": ["<0.12.3"],
                     "publishedDate": "2018-08-20T21:31:00+02:00",
                     "discoveredDate": "2018-08-20T19:31:00Z",
@@ -219,6 +209,30 @@ def scan_result_2() -> Dict[str, Dict[str, Any]]:
                     "policy": "BC_LIC_1"
                 }
             ],
+            "inlineSuppressions": {
+                "cves": {
+                    "byCve": [
+                        {
+                            "cveId": "CVE-2019-1010083",
+                            "reason": "Test CVE suppression 1"
+                        },
+                        {
+                            "cveId": "CVE-2016-6186",
+                            "reason": "Test CVE suppression 2"
+                        }
+                    ]
+                },
+                "licenses": {
+                    "byPackage": [
+                        {
+                            "licenses": [],
+                            "licensePolicy": "BC_LIC_1",
+                            "packageName": "django",
+                            "reason": "Test License suppression 1"
+                        }
+                    ]
+                }
+            }
         },
         "/path/to/sub/requirements.txt": {
             "repository": "/path/to/sub/requirements.txt",
@@ -288,13 +302,8 @@ def scan_result_2() -> Dict[str, Dict[str, Any]]:
                     "packageName": "golang.org/x/crypto",
                     "packageVersion": "v0.0.1",
                     "link": "https://nvd.nist.gov/vuln/detail/CVE-2020-29652",
-                    "riskFactors": [
-                        "Has fix",
-                        "High severity",
-                        "Attack complexity: low",
-                        "Attack vector: network",
-                        "DoS",
-                    ],
+                    'riskFactors': {'Critical severity': {}, 'Attack complexity: low': {}, 'Has fix': {}, 'Remote execution': {}, 'Attack vector: network': {}},
+                    'riskFactorsV2': {'Severity': 'Critical', 'HasFix': True, 'DoS': False, 'AttackComplexity': 'low', 'AttackVector': 'network', 'RemoteExecution': True},
                     "impactedVersions": ["<v0.0.2"],
                     "publishedDate": "2020-12-17T06:15:00+01:00",
                     "discoveredDate": "2020-12-17T05:15:00Z",
@@ -310,7 +319,8 @@ def scan_result_2() -> Dict[str, Dict[str, Any]]:
                     "packageName": "github.com/dgrijalva/jwt-go",
                     "packageVersion": "v3.2.0",
                     "link": "https://nvd.nist.gov/vuln/detail/CVE-2020-26160",
-                    "riskFactors": ["High severity", "Attack complexity: low", "Attack vector: network", "Has fix"],
+                    'riskFactors': {'Critical severity': {}, 'Attack complexity: low': {}, 'Has fix': {}, 'Remote execution': {}, 'Attack vector: network': {}},
+                    'riskFactorsV2': {'Severity': 'Critical', 'HasFix': True, 'DoS': False, 'AttackComplexity': 'low', 'AttackVector': 'network', 'RemoteExecution': True},
                     "impactedVersions": ["<v4.0.0-preview1"],
                     "publishedDate": "2020-09-30T20:15:00+02:00",
                     "discoveredDate": "2020-09-30T18:15:00Z",
@@ -338,51 +348,57 @@ def scan_results_dt() -> Dict[str, Dict[str, Any]]:
                   'link': 'https://nvd.nist.gov/vuln/detail/CVE-2020-15250', 'cvss': 4,
                   'vector': 'CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:H/I:N/A:N',
                   'description': "In JUnit4 from version 4.7 and before 4.13.1, the test rule TemporaryFolder contains a local information disclosure vulnerability. On Unix like systems, the system\\'s temporary directory is shared between all users on that system. Because of this, when files and directories are written into this directory they are, by default, readable by other users on that same system. This vulnerability does not allow other users to overwrite the contents of these directories or files. This is purely an information disclosure vulnerability. This vulnerability impacts you if the JUnit tests write sensitive information, like API keys or passwords, into the temporary folder, and the JUnit tests execute in an environment where the OS has other untrusted users. Because certain JDK file system APIs were only added in JDK 1.7, this this fix is dependent upon the version of the JDK you are using. For Java 1.7 and higher users: this vulnerability is fixed in 4.13.1. For Java 1.6 and lower users: no patch is available, you must use the workaround below. If you are unable to patch, or are stuck running on Java 1.6, specifying the `java.io.tmpdir` system environment variable to a directory that is exclusively owned by the executing user will fix this vulnerability. For more information, including an example of vulnerable code, see the referenced GitHub Security Advisory.",
-                  'riskFactors': ['Medium severity', 'Attack complexity: low', 'Has fix'],
+                  'riskFactors': {'Medium severity': {}, 'Attack complexity: low': {}, 'Has fix': {}},
+                  'riskFactorsV2': {'Severity': 'Medium', 'HasFix': True, 'DoS': False, 'AttackComplexity': 'low'},
                   'publishedDate': '2020-10-12T17:33:00Z'},
                  {'cveId': 'CVE-2015-6420', 'status': 'fixed in 3.2.2', 'severity': 'high',
                   'packageName': 'commons-collections_commons-collections', 'packageVersion': '3.0',
                   'link': 'https://nvd.nist.gov/vuln/detail/CVE-2015-6420', 'cvss': 7,
                   'vector': 'AV:N/AC:L/Au:N/C:P/I:P/A:P',
                   'description': 'Serialized-object interfaces in certain Cisco Collaboration and Social Media; Endpoint Clients and Client Software; Network Application, Service, and Acceleration; Network and Content Security Devices; Network Management and Provisioning; Routing and Switching - Enterprise and Service Provider; Unified Computing; Voice and Unified Communications Devices; Video, Streaming, TelePresence, and Transcoding Devices; Wireless; and Cisco Hosted Services products allow remote attackers to execute arbitrary commands via a crafted serialized Java object, related to the Apache Commons Collections (ACC) library.',
-                  'riskFactors': ['Attack complexity: low', 'Attack vector: network', 'Has fix', 'High severity',
-                                  'Remote execution'], 'publishedDate': '2020-06-15T20:36:20Z'},
+                  'riskFactors': {'Critical severity': {}, 'Attack complexity: low': {}, 'Has fix': {}, 'Remote execution': {}, 'Attack vector: network': {}},
+                  'riskFactorsV2': {'Severity': 'Critical', 'HasFix': True, 'DoS': False, 'AttackComplexity': 'low', 'AttackVector': 'network', 'RemoteExecution': True},
+                  'publishedDate': '2020-06-15T20:36:20Z'},
                  {'cveId': 'CVE-2015-7501', 'status': 'fixed in 3.2.2', 'severity': 'critical',
                   'packageName': 'commons-collections_commons-collections', 'packageVersion': '3.0',
                   'link': 'https://nvd.nist.gov/vuln/detail/CVE-2015-7501', 'cvss': 9,
                   'vector': 'CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
                   'description': 'Red Hat JBoss A-MQ 6.x; BPM Suite (BPMS) 6.x; BRMS 6.x and 5.x; Data Grid (JDG) 6.x; Data Virtualization (JDV) 6.x and 5.x; Enterprise Application Platform 6.x, 5.x, and 4.3.x; Fuse 6.x; Fuse Service Works (FSW) 6.x; Operations Network (JBoss ON) 3.x; Portal 6.x; SOA Platform (SOA-P) 5.x; Web Server (JWS) 3.x; Red Hat OpenShift/xPAAS 3.x; and Red Hat Subscription Asset Manager 1.3 allow remote attackers to execute arbitrary commands via a crafted serialized Java object, related to the Apache Commons Collections (ACC) library.',
-                  'riskFactors': ['Attack complexity: low', 'Attack vector: network', 'Critical severity', 'Has fix',
-                                  'Remote execution'], 'publishedDate': '2022-05-13T01:25:20Z'},
+                  'riskFactors': {'Critical severity': {}, 'Attack complexity: low': {}, 'Has fix': {}, 'Remote execution': {}, 'Attack vector: network': {}},
+                  'riskFactorsV2': {'Severity': 'Critical', 'HasFix': True, 'DoS': False, 'AttackComplexity': 'low', 'AttackVector': 'network', 'RemoteExecution': True},
+                  'publishedDate': '2022-05-13T01:25:20Z'},
                  {'cveId': 'CVE-2021-45046', 'status': 'fixed in 2.16.0, 2.12.2, 2.3.1', 'severity': 'critical',
                   'packageName': 'org.apache.logging.log4j_log4j-core', 'packageVersion': '2.14.0',
                   'link': 'https://logging.apache.org/log4j/2.x/security.html#CVE-2021-45046', 'cvss': 9,
                   'vector': 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:H/A:H',
                   'description': 'It was found that the fix to address CVE-2021-44228 in Apache Log4j 2.15.0 was incomplete in certain non-default configurations. This could allows attackers with control over Thread Context Map (MDC) input data when the logging configuration uses a non-default Pattern Layout with either a Context Lookup (for example, $${ctx:loginId}) or a Thread Context Map pattern (%X, %mdc, or %MDC) to craft malicious input data using a JNDI Lookup pattern resulting in an information leak and remote code execution in some environments and local code execution in all environments. Log4j 2.16.0 (Java 8) and 2.12.2 (Java 7) fix this issue by removing support for message lookup patterns and disabling JNDI functionality by default.',
-                  'riskFactors': ['Attack vector: network', 'Critical severity', 'Has fix', 'Recent vulnerability',
-                                  'Remote execution'], 'publishedDate': '2021-12-14T19:15:00Z'},
+                  'riskFactors': {'Critical severity': {}, 'Attack complexity: low': {}, 'Has fix': {}, 'Remote execution': {}, 'Attack vector: network': {}},
+                  'riskFactorsV2': {'Severity': 'Critical', 'HasFix': True, 'DoS': False, 'AttackComplexity': 'low', 'AttackVector': 'network', 'RemoteExecution': True},
+                  'publishedDate': '2021-12-14T19:15:00Z'},
                  {'cveId': 'CVE-2021-45105', 'status': 'fixed in 2.17.0, 2.12.3, 2.3.1', 'severity': 'high',
                   'packageName': 'org.apache.logging.log4j_log4j-core', 'packageVersion': '2.14.0',
                   'link': 'https://logging.apache.org/log4j/2.x/security.html#CVE-2021-45105', 'cvss': 7.5,
                   'vector': 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:H',
                   'description': 'Apache Log4j2 versions 2.0-alpha1 through 2.16.0 (excluding 2.12.3 and 2.3.1) did not protect from uncontrolled recursion from self-referential lookups. This allows an attacker with control over Thread Context Map data to cause a denial of service when a crafted string is interpreted. This issue was fixed in Log4j 2.17.0, 2.12.3, and 2.3.1.',
-                  'riskFactors': ['Attack vector: network', 'DoS', 'Has fix', 'High severity',
-                                  'Recent vulnerability'],
+                  'riskFactors': {'Critical severity': {}, 'Attack complexity: low': {}, 'Has fix': {}, 'Remote execution': {}, 'Attack vector: network': {}},
+                  'riskFactorsV2': {'Severity': 'Critical', 'HasFix': True, 'DoS': False, 'AttackComplexity': 'low', 'AttackVector': 'network', 'RemoteExecution': True},
                   'publishedDate': '2021-12-18T18:00:07Z'},
                  {'cveId': 'CVE-2021-44832', 'status': 'fixed in 2.17.1, 2.12.4, 2.3.2', 'severity': 'medium',
                   'packageName': 'org.apache.logging.log4j_log4j-core', 'packageVersion': '2.14.0',
                   'link': 'https://logging.apache.org/log4j/2.x/security.html#CVE-2021-44832', 'cvss': 6.6,
                   'vector': 'CVSS:3.1/AV:N/AC:H/PR:H/UI:N/S:U/C:H/I:H/A:H',
                   'description': 'Apache Log4j2 versions 2.0-beta7 through 2.17.0 (excluding security fix releases 2.3.2 and 2.12.4) are vulnerable to a remote code execution (RCE) attack when a configuration uses a JDBC Appender with a JNDI LDAP data source URI when an attacker has control of the target LDAP server. This issue is fixed by limiting JNDI data source names to the java protocol in Log4j2 versions 2.17.1, 2.12.4, and 2.3.2.',
-                  'riskFactors': ['Recent vulnerability', 'Remote execution', 'Attack vector: network', 'Has fix',
-                                  'Medium severity'], 'publishedDate': '2021-12-28T20:15:00Z'},
+                  'riskFactors': {'Critical severity': {}, 'Attack complexity: low': {}, 'Has fix': {}, 'Remote execution': {}, 'Attack vector: network': {}},
+                  'riskFactorsV2': {'Severity': 'Critical', 'HasFix': True, 'DoS': False, 'AttackComplexity': 'low', 'AttackVector': 'network', 'RemoteExecution': True},
+                  'publishedDate': '2021-12-28T20:15:00Z'},
                  {'cveId': 'CVE-2021-44228', 'status': 'fixed in 2.15.0, 2.12.2', 'severity': 'critical',
                   'packageName': 'org.apache.logging.log4j_log4j-core', 'packageVersion': '2.14.0',
                   'link': 'https://logging.apache.org/log4j/2.x/security.html#CVE-2021-44228', 'cvss': 10,
                   'vector': 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H',
                   'description': 'Apache Log4j2 2.0-beta9 through 2.15.0 (excluding security releases 2.12.2, 2.12.3, and 2.3.1) JNDI features used in configuration, log messages, and parameters do not protect against attacker controlled LDAP and other JNDI related endpoints. An attacker who can control log messages or log message parameters can execute arbitrary code loaded from LDAP servers when message lookup substitution is enabled. From log4j 2.15.0, this behavior has been disabled by default. From version 2.16.0 (along with 2.12.2, 2.12.3, and 2.3.1), this functionality has been completely removed. Note that this vulnerability is specific to log4j-core and does not affect log4net, log4cxx, or other Apache Logging Services projects.',
-                  'riskFactors': ['Attack complexity: low', 'Attack vector: network', 'Critical severity', 'Has fix',
-                                  'Recent vulnerability'], 'publishedDate': '2021-12-10T10:15:00Z'}],
+                  'riskFactors': {'Critical severity': {}, 'Attack complexity: low': {}, 'Has fix': {}, 'Remote execution': {}, 'Attack vector: network': {}},
+                  'riskFactorsV2': {'Severity': 'Critical', 'HasFix': True, 'DoS': False, 'AttackComplexity': 'low', 'AttackVector': 'network', 'RemoteExecution': True},
+                  'publishedDate': '2021-12-10T10:15:00Z'}],
              'name': 'pom.xml',
              'filePath': '/package-files/java/maven/normal/pom.xml',
              'fileContent': None, 'packages': [
@@ -403,24 +419,27 @@ def scan_results_dt() -> Dict[str, Dict[str, Any]]:
                   'packageName': 'marked',
                   'packageVersion': '0.3.9', 'link': None, 'cvss': None, 'vector': None,
                   'description': 'marked package prior to 1.1.1 are vulnerable to  Regular Expression Denial of Service (ReDoS). The regex within src/rules.js file have multiple unused capture groups which could lead to a denial of service attack if user input is reachable.  Origin: https://github.com/markedjs/marked/commit/bd4f8c464befad2b304d51e33e89e567326e62e0',
-                  'riskFactors': ['Medium severity', 'DoS', 'Has fix'], 'publishedDate': '2021-01-14T10:29:35Z'},
+                  'riskFactors': {'Critical severity': {}, 'Attack complexity: low': {}, 'Has fix': {}, 'Remote execution': {}, 'Attack vector: network': {}},
+                  'riskFactorsV2': {'Severity': 'Critical', 'HasFix': True, 'DoS': False, 'AttackComplexity': 'low', 'AttackVector': 'network', 'RemoteExecution': True},
+                  'publishedDate': '2021-01-14T10:29:35Z'},
                  {'cveId': 'CVE-2022-21681', 'status': 'fixed in 4.0.10', 'severity': 'high',
                   'packageName': 'marked',
                   'packageVersion': '0.3.9', 'link': 'https://github.com/advisories/GHSA-5v2h-r2cx-5xgj',
                   'cvss': 7.5,
                   'vector': 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H',
                   'description': 'Marked is a markdown parser and compiler. Prior to version 4.0.10, the regular expression `inline.reflinkSearch` may cause catastrophic backtracking against some strings and lead to a denial of service (DoS). Anyone who runs untrusted markdown through a vulnerable version of marked and does not use a worker with a time limit may be affected. This issue is patched in version 4.0.10. As a workaround, avoid running untrusted markdown through marked or run marked on a worker thread and set a reasonable time limit to prevent draining resources.',
-                  'riskFactors': ['Recent vulnerability', 'Attack complexity: low', 'Attack vector: network', 'DoS',
-                                  'Has fix', 'High severity'], 'publishedDate': '2022-01-14T17:15:00Z'},
+                  'riskFactors': {'Critical severity': {}, 'Attack complexity: low': {}, 'Has fix': {}, 'Remote execution': {}, 'Attack vector: network': {}},
+                  'riskFactorsV2': {'Severity': 'Critical', 'HasFix': True, 'DoS': False, 'AttackComplexity': 'low', 'AttackVector': 'network', 'RemoteExecution': True},
+                  'publishedDate': '2022-01-14T17:15:00Z'},
                  {'cveId': 'CVE-2022-21680', 'status': 'fixed in 4.0.10', 'severity': 'high',
                   'packageName': 'marked',
                   'packageVersion': '0.3.9', 'link': 'https://github.com/advisories/GHSA-rrrm-qjm4-v8hf',
                   'cvss': 7.5,
                   'vector': 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H',
                   'description': 'Marked is a markdown parser and compiler. Prior to version 4.0.10, the regular expression `block.def` may cause catastrophic backtracking against some strings and lead to a regular expression denial of service (ReDoS). Anyone who runs untrusted markdown through a vulnerable version of marked and does not use a worker with a time limit may be affected. This issue is patched in version 4.0.10. As a workaround, avoid running untrusted markdown through marked or run marked on a worker thread and set a reasonable time limit to prevent draining resources.',
-                  'riskFactors': ['Attack complexity: low', 'Attack vector: network', 'DoS', 'Has fix',
-                                  'High severity',
-                                  'Recent vulnerability'], 'publishedDate': '2022-01-14T17:15:00Z'}],
+                  'riskFactors': {'Critical severity': {}, 'Attack complexity: low': {}, 'Has fix': {}, 'Remote execution': {}, 'Attack vector: network': {}},
+                  'riskFactorsV2': {'Severity': 'Critical', 'HasFix': True, 'DoS': False, 'AttackComplexity': 'low', 'AttackVector': 'network', 'RemoteExecution': True},
+                  'publishedDate': '2022-01-14T17:15:00Z'}],
              'name': 'package.json', 'filePath': '/package-files/yarn/package.json',
              'fileContent': None, 'packages': [
                 {'type': 'nodejs', 'name': 'marked', 'version': '0.3.9', 'licenses': []},
@@ -1064,19 +1083,36 @@ def sca_package_2_report(package_mocker: MockerFixture, scan_result_2: Dict[str,
     scanner_mock = MagicMock()
     scanner_mock.return_value.scan.return_value = scan_result_2
     package_mocker.patch("checkov.sca_package_2.runner.Scanner", side_effect=scanner_mock)
+    # package_mocker.patch()
+    def none() -> None:
+        pass
 
+    bc_integration.set_s3_integration = none
+
+    os.chdir(str(Path(__file__).parent.parent.parent))
     return Runner().run(root_folder=EXAMPLES_DIR)
 
 
 @pytest.fixture(scope='package')
 @mock.patch.dict(os.environ, {'CHECKOV_RUN_SCA_PACKAGE_SCAN_V2': 'true'})
-def sca_package_report_dt(package_mocker: MockerFixture, scan_results_dt: Dict[str, Any]) -> Report:
+def sca_package_report_dt(package_mocker: MockerFixture, scan_results_dt: Dict[str, Any]) -> Generator[Report, None, None]:
+    orig_bc_api_key = bc_integration.bc_api_key
+    orig_bc_source = bc_integration.bc_source
+    orig_timestamp = bc_integration.timestamp
     bc_integration.bc_api_key = "abcd1234-abcd-1234-abcd-1234abcd1234"
+    bc_integration.timestamp = "1700692537"
+    bc_integration.bc_source = None
+
     scanner_mock = MagicMock()
     scanner_mock.return_value.scan.return_value = scan_results_dt
     package_mocker.patch("checkov.sca_package_2.runner.Scanner", side_effect=scanner_mock)
+    os.chdir(str(Path(__file__).parent.parent.parent))
 
-    return Runner().run(root_folder=EXAMPLES_DIR)
+    yield Runner().run(root_folder=EXAMPLES_DIR)
+
+    bc_integration.bc_api_key = orig_bc_api_key
+    bc_integration.bc_source = orig_bc_source
+    bc_integration.timestamp = orig_timestamp
 
 
 @pytest.fixture(scope='package')
@@ -1115,7 +1151,7 @@ def get_vulnerabilities_details_package_json() -> List[Dict[str, Any]]:
     return [
         {'details': {'cveId': 'PRISMA-2021-0070', 'severity': 'medium', 'packageName': 'cypress',
                      'packageVersion': '3.8.3', 'link': '', 'cvss': 0, 'vector': '',
-                     'description': '', 'riskFactors': {}, 'publishedDate': '',
+                     'description': '', 'riskFactorsV2': {}, 'publishedDate': '',
                      'status': 'fixed in 7.2.0', 'lowest_fixed_version': '7.2.0'},
          'root_package_version': '3.8.3', 'root_package_name': 'cypress'},
         {'details': {'cveId': 'CVE-2021-44906', 'severity': 'critical', 'packageName': 'minimist',
@@ -1123,13 +1159,13 @@ def get_vulnerabilities_details_package_json() -> List[Dict[str, Any]]:
                      'link': '', 'cvss': 9.8,
                      'vector': '',
                      'description': '',
-                     'riskFactors': {},
+                     'riskFactorsV2': {},
                      'publishedDate': '', 'status': 'fixed in 1.2.6'}, 'root_package_name': 'forever',
          'root_package_version': '2.0.0'},
         {'details': {'cveId': 'CVE-2022-21803', 'severity': 'high', 'packageName': 'nconf', 'packageVersion': '0.6.9',
                      'link': '', 'cvss': 7.5, 'vector': '',
                      'description': '',
-                     'riskFactors': {},
+                     'riskFactorsV2': {},
                      'publishedDate': '', 'status': 'fixed in 0.11.4'}, 'root_package_name': 'forever',
          'root_package_version': '2.0.0'},
         {'details': {'cveId': 'CVE-2020-7598', 'severity': 'medium', 'packageName': 'minimist',
@@ -1137,7 +1173,7 @@ def get_vulnerabilities_details_package_json() -> List[Dict[str, Any]]:
                      'link': '', 'cvss': 5.6,
                      'vector': '',
                      'description': '',
-                     'riskFactors': {},
+                     'riskFactorsV2': {},
                      'publishedDate': '', 'status': 'fixed in 1.2.2',
                      }, 'root_package_name': 'forever', 'root_package_version': '2.0.0'},
         {'details': {'cveId': 'CVE-2021-44906', 'severity': 'critical', 'packageName': 'minimist',
@@ -1145,7 +1181,7 @@ def get_vulnerabilities_details_package_json() -> List[Dict[str, Any]]:
                      'link': '', 'cvss': 9.8,
                      'vector': '',
                      'description': '',
-                     'riskFactors': {},
+                     'riskFactorsV2': {},
                      'publishedDate': '', 'status': 'fixed in 1.2.6'}, 'root_package_name': 'forever',
          'root_package_version': '2.0.0'},
         {'details': {'cveId': 'PRISMA-2022-0049', 'severity': 'high', 'packageName': 'unset-value',
@@ -1153,7 +1189,7 @@ def get_vulnerabilities_details_package_json() -> List[Dict[str, Any]]:
                      'link': '',
                      'cvss': 8, 'vector': '',
                      'description': '',
-                     'riskFactors': {}, 'status': 'fixed in 2.0.1',
+                     'riskFactorsV2': {}, 'status': 'fixed in 2.0.1',
                      'publishedDate': ''}, 'root_package_name': 'forever',
          'root_package_version': '2.0.0'},
         {'details': {'cveId': 'CVE-2020-28469', 'severity': 'high', 'packageName': 'glob-parent',
@@ -1161,104 +1197,104 @@ def get_vulnerabilities_details_package_json() -> List[Dict[str, Any]]:
                      'link': '', 'cvss': 7.5,
                      'vector': '',
                      'description': '',
-                     'riskFactors': {}, 'publishedDate': '', 'status': 'fixed in 5.1.2'},
+                     'riskFactorsV2': {}, 'publishedDate': '', 'status': 'fixed in 5.1.2'},
          'root_package_name': 'forever', 'root_package_version': '2.0.0'},
         {'details': {'cveId': 'CVE-2022-38900', 'severity': 'low', 'packageName': 'decode-uri-component',
                      'packageVersion': '0.2.0',
                      'link': '', 'cvss': 1,
                      'vector': '',
                      'description': '',
-                     'riskFactors': {}, 'publishedDate': '', 'status': 'fixed in 0.2.1'},
+                     'riskFactorsV2': {}, 'publishedDate': '', 'status': 'fixed in 0.2.1'},
          'root_package_name': 'forever', 'root_package_version': '2.0.0'},
         {'details': {'cveId': 'CVE-2022-21803', 'severity': 'high', 'packageName': 'nconf', 'packageVersion': '0.10.0',
                      'link': '', 'cvss': 7.5,
                      'vector': '',
                      'description': '',
-                     'riskFactors': {},
+                     'riskFactorsV2': {},
                      'publishedDate': '', 'status': 'fixed in 0.11.4'}, 'root_package_name': 'forever',
          'root_package_version': '2.0.0'},
         {'details': {'cveId': 'CVE-2022-1537', 'severity': 'high', 'packageName': 'grunt', 'packageVersion': '1.4.1',
                      'link': '', 'cvss': 7,
                      'vector': '',
                      'description': '',
-                     'riskFactors': {},
+                     'riskFactorsV2': {},
                      'publishedDate': '', 'status': 'fixed in 1.5.3'}, 'root_package_name': 'grunt',
          'root_package_version': '1.4.1'},
         {'details': {'cveId': 'CVE-2022-0436', 'severity': 'medium', 'packageName': 'grunt', 'packageVersion': '1.4.1',
                      'link': '', 'cvss': 5.5,
                      'vector': '',
                      'description': '',
-                     'riskFactors': {}, 'publishedDate': '', 'status': 'fixed in 1.5.2'},
+                     'riskFactorsV2': {}, 'publishedDate': '', 'status': 'fixed in 1.5.2'},
          'root_package_name': 'grunt', 'root_package_version': '1.4.1'},
         {'details': {'cveId': 'CVE-2017-16137', 'severity': 'medium', 'packageName': 'debug', 'packageVersion': '2.2.0',
                      'link': '', 'cvss': 5.3,
                      'vector': '',
                      'description': '',
-                     'riskFactors': {}, 'publishedDate': '', 'status': 'fixed in 3.1.0, 2.6.9'},
+                     'riskFactorsV2': {}, 'publishedDate': '', 'status': 'fixed in 3.1.0, 2.6.9'},
          'root_package_name': 'helmet', 'root_package_version': '2.3.0', 'root_package_fix_version': '2.4.0'},
         {'details': {'cveId': 'GHSA-C3M8-X3CG-QM2C', 'severity': 'medium', 'packageName': 'helmet-csp',
                      'packageVersion': '1.2.2', 'link': '', 'cvss': 4, 'vector': '',
                      'description': '',
-                     'riskFactors': {}, 'publishedDate': '', 'status': 'fixed in 2.9.1',
+                     'riskFactorsV2': {}, 'publishedDate': '', 'status': 'fixed in 2.9.1',
                      'rootPackageFixedVersion': '2.4.0'},
          'root_package_name': 'helmet', 'root_package_version': '2.3.0'},
         {'details': {'cveId': 'GHSA-C3M8-X3CG-QM2C', 'severity': 'medium', 'packageName': 'helmet',
                      'packageVersion': '2.3.0', 'link': '', 'cvss': 4, 'vector': '',
-                     'description': '', 'riskFactors': {}, 'publishedDate': '', 'status': 'fixed in 2.4.0'},
+                     'description': '', 'riskFactorsV2': {}, 'publishedDate': '', 'status': 'fixed in 2.4.0'},
          'root_package_name': 'helmet', 'root_package_version': '2.3.0'},
         {'details': {'cveId': 'PRISMA-2021-0013', 'severity': 'medium', 'packageName': 'marked',
                      'packageVersion': '0.3.9',
                      'link': '', 'cvss': 0, 'vector': '',
                      'description': '',
-                     'riskFactors': {},
+                     'riskFactorsV2': {},
                      'publishedDate': '', 'status': 'fixed in 1.1.1'}, 'root_package_name': 'marked',
          'root_package_version': '0.3.9'},
         {'details': {'cveId': 'CVE-2022-21681', 'severity': 'high', 'packageName': 'marked', 'packageVersion': '0.3.9',
                      'link': '', 'cvss': 7.5,
                      'vector': '',
                      'description': '',
-                     'riskFactors': {},
+                     'riskFactorsV2': {},
                      'publishedDate': '', 'status': 'fixed in 4.0.10'}, 'root_package_name': 'marked',
          'root_package_version': '0.3.9'},
         {'details': {'cveId': 'CVE-2022-21680', 'severity': 'high', 'packageName': 'marked', 'packageVersion': '0.3.9',
                      'link': '', 'cvss': 7.5,
                      'vector': '',
                      'description': '',
-                     'riskFactors': {},
+                     'riskFactorsV2': {},
                      'publishedDate': '', 'status': 'fixed in 4.0.10'}, 'root_package_name': 'marked',
          'root_package_version': '0.3.9'},
         {'details': {'cveId': 'PRISMA-2022-0230', 'severity': 'high', 'packageName': 'mocha', 'packageVersion': '2.5.3',
                      'link': '', 'cvss': 7.5, 'vector': '',
                      'description': '',
-                     'riskFactors': {}, 'publishedDate': '', 'status': 'open'},
+                     'riskFactorsV2': {}, 'publishedDate': '', 'status': 'open'},
          'root_package_name': 'mocha', 'root_package_version': '2.5.3'},
         {'details': {'cveId': 'PRISMA-2022-0335', 'severity': 'medium', 'packageName': 'mocha',
                      'packageVersion': '2.5.3',
                      'link': '',
                      'cvss': 5.3, 'vector': '',
                      'description': '',
-                     'riskFactors': {}, 'publishedDate': '', 'status': 'open'},
+                     'riskFactorsV2': {}, 'publishedDate': '', 'status': 'open'},
          'root_package_name': 'mocha', 'root_package_version': '2.5.3'},
         {'details': {'cveId': 'GHSA-MH5C-679W-HH4R', 'severity': 'high', 'packageName': 'mongodb',
                      'packageVersion': '2.2.36',
                      'link': '', 'cvss': 7, 'vector': '', 'description': '',
-                     'riskFactors': {},
+                     'riskFactorsV2': {},
                      'publishedDate': '', 'status': 'fixed in 3.1.13'}, 'root_package_name': 'mongodb',
          'root_package_version': '2.2.36'},
         {'details': {'cveId': 'CVE-2019-2391', 'severity': 'medium', 'packageName': 'bson', 'packageVersion': '1.0.9',
                      'link': '', 'cvss': 4, 'vector': '', 'description': '',
-                     'riskFactors': {}, 'publishedDate': '', 'status': 'fixed in 1.1.4'
+                     'riskFactorsV2': {}, 'publishedDate': '', 'status': 'fixed in 1.1.4'
                      }, 'root_package_name': 'mongodb', 'root_package_version': '2.2.36'},
         {'details': {'cveId': 'CVE-2020-7610', 'severity': 'critical', 'packageName': 'bson', 'packageVersion': '1.0.9',
                      'link': '', 'cvss': 9.8,
                      'vector': '',
                      'description': '',
-                     'riskFactors': {}, 'publishedDate': '', 'status': 'fixed in 1.1.4'
+                     'riskFactorsV2': {}, 'publishedDate': '', 'status': 'fixed in 1.1.4'
                      }, 'root_package_name': 'mongodb', 'root_package_version': '2.2.36'},
         {'details': {'cveId': 'CVE-2020-7598', 'severity': 'medium', 'packageName': 'minimist',
                      'packageVersion': '0.0.10',
                      'link': '', 'cvss': 5.6, 'vector': '', 'description': '',
-                     'riskFactors': {},
+                     'riskFactorsV2': {},
                      'publishedDate': '', 'status': 'fixed in 1.2.2'}, 'root_package_name': 'swig',
          'root_package_version': '1.4.2'},
         {'details': {'cveId': 'CVE-2021-44906', 'severity': 'critical', 'packageName': 'minimist',
@@ -1266,14 +1302,14 @@ def get_vulnerabilities_details_package_json() -> List[Dict[str, Any]]:
                      'link': '', 'cvss': 9.8,
                      'vector': '',
                      'description': '',
-                     'riskFactors': {},
+                     'riskFactorsV2': {},
                      'publishedDate': '', 'status': 'fixed in 1.2.6'}, 'root_package_name': 'swig',
          'root_package_version': '1.4.2'},
         {'details': {'cveId': 'PRISMA-2021-0169', 'severity': 'medium', 'packageName': 'uglify-js',
                      'packageVersion': '2.4.24', 'link': '',
                      'cvss': 5.3, 'vector': '',
                      'description': '',
-                     'riskFactors': {},
+                     'riskFactorsV2': {},
                      'publishedDate': '', 'status': 'fixed in 3.14.3'}, 'root_package_name': 'swig',
          'root_package_version': '1.4.2'},
         {'details': {'cveId': 'CVE-2015-8858', 'severity': 'high', 'packageName': 'uglify-js',
@@ -1281,10 +1317,189 @@ def get_vulnerabilities_details_package_json() -> List[Dict[str, Any]]:
                      'link': '', 'cvss': 7,
                      'vector': '',
                      'description': '',
-                     'riskFactors': {}, 'publishedDate': '', 'status': 'fixed in 2.6.0'},
+                     'riskFactorsV2': {}, 'publishedDate': '', 'status': 'fixed in 2.6.0'},
          'root_package_name': 'swig', 'root_package_version': '1.4.2'}
     ]
 
+def get_vulnerabilities_details_package_lock_json() -> List[Dict[str, Any]]:
+    return [
+        {'details': {'cveId': 'PRISMA-2021-0070', 'severity': 'medium', 'packageName': 'cypress',
+                     'packageVersion': '3.8.3', 'link': '', 'cvss': 0, 'vector': '',
+                     'description': '', 'riskFactorsV2': {}, 'publishedDate': '',
+                     'status': 'fixed in 7.2.0', 'lowest_fixed_version': '7.2.0'},
+         'root_package_version': '3.8.3', 'root_package_name': 'cypress'},
+        {'details': {'cveId': 'CVE-2021-44906', 'severity': 'critical', 'packageName': 'minimist',
+                     'packageVersion': '1.2.5',
+                     'link': '', 'cvss': 9.8,
+                     'vector': '',
+                     'description': '',
+                     'riskFactorsV2': {},
+                     'publishedDate': '', 'status': 'fixed in 1.2.6'}, 'root_package_name': 'forever',
+         'root_package_version': '2.0.0'},
+        {'details': {'cveId': 'CVE-2022-21803', 'severity': 'high', 'packageName': 'nconf', 'packageVersion': '0.6.9',
+                     'link': '', 'cvss': 7.5, 'vector': '',
+                     'description': '',
+                     'riskFactorsV2': {},
+                     'publishedDate': '', 'status': 'fixed in 0.11.4'}, 'root_package_name': 'forever',
+         'root_package_version': '2.0.0'},
+        {'details': {'cveId': 'CVE-2002-21803', 'severity': 'high', 'packageName': 'nconf', 'packageVersion': '0.6.9',
+                     'link': '', 'cvss': 7.5, 'vector': '',
+                     'description': '',
+                     'riskFactorsV2': {},
+                     'publishedDate': '', 'status': 'fixed in 0.11.4'}, 'root_package_name': 'forever',
+         'root_package_version': '2.0.0'},
+        {'details': {'cveId': 'CVE-2020-7598', 'severity': 'medium', 'packageName': 'minimist',
+                     'packageVersion': '0.0.10',
+                     'link': '', 'cvss': 5.6,
+                     'vector': '',
+                     'description': '',
+                     'riskFactorsV2': {},
+                     'publishedDate': '', 'status': 'fixed in 1.2.2',
+                     }, 'root_package_name': 'forever', 'root_package_version': '2.0.0'},
+        {'details': {'cveId': 'CVE-2021-44906', 'severity': 'critical', 'packageName': 'minimist',
+                     'packageVersion': '0.0.10',
+                     'link': '', 'cvss': 9.8,
+                     'vector': '',
+                     'description': '',
+                     'riskFactorsV2': {},
+                     'publishedDate': '', 'status': 'fixed in 1.2.6'}, 'root_package_name': 'forever',
+         'root_package_version': '2.0.0'},
+        {'details': {'cveId': 'PRISMA-2022-0049', 'severity': 'high', 'packageName': 'unset-value',
+                     'packageVersion': '1.0.0',
+                     'link': '',
+                     'cvss': 8, 'vector': '',
+                     'description': '',
+                     'riskFactorsV2': {}, 'status': 'fixed in 2.0.1',
+                     'publishedDate': ''}, 'root_package_name': 'forever',
+         'root_package_version': '2.0.0'},
+        {'details': {'cveId': 'CVE-2020-28469', 'severity': 'high', 'packageName': 'glob-parent',
+                     'packageVersion': '3.1.0',
+                     'link': '', 'cvss': 7.5,
+                     'vector': '',
+                     'description': '',
+                     'riskFactorsV2': {}, 'publishedDate': '', 'status': 'fixed in 5.1.2'},
+         'root_package_name': 'forever', 'root_package_version': '2.0.0'},
+        {'details': {'cveId': 'CVE-2022-38900', 'severity': 'low', 'packageName': 'decode-uri-component',
+                     'packageVersion': '0.2.0',
+                     'link': '', 'cvss': 1,
+                     'vector': '',
+                     'description': '',
+                     'riskFactorsV2': {}, 'publishedDate': '', 'status': 'fixed in 0.2.1'},
+         'root_package_name': 'forever', 'root_package_version': '2.0.0'},
+        {'details': {'cveId': 'CVE-2022-21803', 'severity': 'high', 'packageName': 'nconf', 'packageVersion': '0.10.0',
+                     'link': '', 'cvss': 7.5,
+                     'vector': '',
+                     'description': '',
+                     'riskFactorsV2': {},
+                     'publishedDate': '', 'status': 'fixed in 0.11.4'}, 'root_package_name': 'forever',
+         'root_package_version': '2.0.0'},
+        {'details': {'cveId': 'CVE-2022-1537', 'severity': 'high', 'packageName': 'grunt', 'packageVersion': '1.4.1',
+                     'link': '', 'cvss': 7,
+                     'vector': '',
+                     'description': '',
+                     'riskFactorsV2': {},
+                     'publishedDate': '', 'status': 'fixed in 1.5.3'}, 'root_package_name': 'grunt',
+         'root_package_version': '1.4.1'},
+        {'details': {'cveId': 'CVE-2022-0436', 'severity': 'medium', 'packageName': 'grunt', 'packageVersion': '1.4.1',
+                     'link': '', 'cvss': 5.5,
+                     'vector': '',
+                     'description': '',
+                     'riskFactorsV2': {}, 'publishedDate': '', 'status': 'fixed in 1.5.2'},
+         'root_package_name': 'grunt', 'root_package_version': '1.4.1'},
+        {'details': {'cveId': 'CVE-2017-16137', 'severity': 'medium', 'packageName': 'debug', 'packageVersion': '2.2.0',
+                     'link': '', 'cvss': 5.3,
+                     'vector': '',
+                     'description': '',
+                     'riskFactorsV2': {}, 'publishedDate': '', 'status': 'fixed in 3.1.0, 2.6.9'},
+         'root_package_name': 'helmet', 'root_package_version': '2.3.0', 'root_package_fix_version': '2.4.0'},
+        {'details': {'cveId': 'GHSA-C3M8-X3CG-QM2C', 'severity': 'medium', 'packageName': 'helmet-csp',
+                     'packageVersion': '1.2.2', 'link': '', 'cvss': 4, 'vector': '',
+                     'description': '',
+                     'riskFactorsV2': {}, 'publishedDate': '', 'status': 'fixed in 2.9.1',
+                     'rootPackageFixedVersion': '2.4.0'},
+         'root_package_name': 'helmet', 'root_package_version': '2.3.0'},
+        {'details': {'cveId': 'GHSA-C3M8-X3CG-QM2C', 'severity': 'medium', 'packageName': 'helmet',
+                     'packageVersion': '2.3.0', 'link': '', 'cvss': 4, 'vector': '',
+                     'description': '', 'riskFactorsV2': {}, 'publishedDate': '', 'status': 'fixed in 2.4.0'},
+         'root_package_name': 'helmet', 'root_package_version': '2.3.0'},
+        {'details': {'cveId': 'PRISMA-2021-0013', 'severity': 'medium', 'packageName': 'marked',
+                     'packageVersion': '0.3.9',
+                     'link': '', 'cvss': 0, 'vector': '',
+                     'description': '',
+                     'riskFactorsV2': {},
+                     'publishedDate': '', 'status': 'fixed in 1.1.1'}, 'root_package_name': 'marked',
+         'root_package_version': '0.3.9'},
+        {'details': {'cveId': 'CVE-2022-21681', 'severity': 'high', 'packageName': 'marked', 'packageVersion': '0.3.9',
+                     'link': '', 'cvss': 7.5,
+                     'vector': '',
+                     'description': '',
+                     'riskFactorsV2': {},
+                     'publishedDate': '', 'status': 'fixed in 4.0.10'}, 'root_package_name': 'marked',
+         'root_package_version': '0.3.9'},
+        {'details': {'cveId': 'CVE-2022-21680', 'severity': 'high', 'packageName': 'marked', 'packageVersion': '0.3.9',
+                     'link': '', 'cvss': 7.5,
+                     'vector': '',
+                     'description': '',
+                     'riskFactorsV2': {},
+                     'publishedDate': '', 'status': 'fixed in 4.0.10'}, 'root_package_name': 'marked',
+         'root_package_version': '0.3.9'},
+        {'details': {'cveId': 'PRISMA-2022-0230', 'severity': 'high', 'packageName': 'mocha', 'packageVersion': '2.5.3',
+                     'link': '', 'cvss': 7.5, 'vector': '',
+                     'description': '',
+                     'riskFactorsV2': {}, 'publishedDate': '', 'status': 'open'},
+         'root_package_name': 'mocha', 'root_package_version': '2.5.3'},
+        {'details': {'cveId': 'PRISMA-2022-0335', 'severity': 'medium', 'packageName': 'mocha',
+                     'packageVersion': '2.5.3',
+                     'link': '',
+                     'cvss': 5.3, 'vector': '',
+                     'description': '',
+                     'riskFactorsV2': {}, 'publishedDate': '', 'status': 'open'},
+         'root_package_name': 'mocha', 'root_package_version': '2.5.3'},
+        {'details': {'cveId': 'GHSA-MH5C-679W-HH4R', 'severity': 'high', 'packageName': 'mongodb',
+                     'packageVersion': '2.2.36',
+                     'link': '', 'cvss': 7, 'vector': '', 'description': '',
+                     'riskFactorsV2': {},
+                     'publishedDate': '', 'status': 'fixed in 3.1.13'}, 'root_package_name': 'mongodb',
+         'root_package_version': '2.2.36'},
+        {'details': {'cveId': 'CVE-2019-2391', 'severity': 'medium', 'packageName': 'bson', 'packageVersion': '1.0.9',
+                     'link': '', 'cvss': 4, 'vector': '', 'description': '',
+                     'riskFactorsV2': {}, 'publishedDate': '', 'status': 'fixed in 1.1.4'
+                     }, 'root_package_name': 'mongodb', 'root_package_version': '2.2.36'},
+        {'details': {'cveId': 'CVE-2020-7610', 'severity': 'critical', 'packageName': 'bson', 'packageVersion': '1.0.9',
+                     'link': '', 'cvss': 9.8,
+                     'vector': '',
+                     'description': '',
+                     'riskFactorsV2': {}, 'publishedDate': '', 'status': 'fixed in 1.1.4'
+                     }, 'root_package_name': 'mongodb', 'root_package_version': '2.2.36'},
+        {'details': {'cveId': 'CVE-2020-7598', 'severity': 'medium', 'packageName': 'minimist',
+                     'packageVersion': '0.0.10',
+                     'link': '', 'cvss': 5.6, 'vector': '', 'description': '',
+                     'riskFactorsV2': {},
+                     'publishedDate': '', 'status': 'fixed in 1.2.2'}, 'root_package_name': 'swig',
+         'root_package_version': '1.4.2'},
+        {'details': {'cveId': 'CVE-2021-44906', 'severity': 'critical', 'packageName': 'minimist',
+                     'packageVersion': '0.0.10',
+                     'link': '', 'cvss': 9.8,
+                     'vector': '',
+                     'description': '',
+                     'riskFactorsV2': {},
+                     'publishedDate': '', 'status': 'fixed in 1.2.6'}, 'root_package_name': 'swig',
+         'root_package_version': '1.4.2'},
+        {'details': {'cveId': 'PRISMA-2021-0169', 'severity': 'medium', 'packageName': 'uglify-js',
+                     'packageVersion': '2.4.24', 'link': '',
+                     'cvss': 5.3, 'vector': '',
+                     'description': '',
+                     'riskFactorsV2': {},
+                     'publishedDate': '', 'status': 'fixed in 3.14.3'}, 'root_package_name': 'swig',
+         'root_package_version': '1.4.2'},
+        {'details': {'cveId': 'CVE-2015-8858', 'severity': 'high', 'packageName': 'uglify-js',
+                     'packageVersion': '2.4.24',
+                     'link': '', 'cvss': 7,
+                     'vector': '',
+                     'description': '',
+                     'riskFactorsV2': {}, 'publishedDate': '', 'status': 'fixed in 2.6.0'},
+         'root_package_name': 'swig', 'root_package_version': '1.4.2'}
+    ]
 
 def get_vulnerabilities_details() -> List[Dict[str, Any]]:
     return [
@@ -1298,12 +1513,10 @@ def get_vulnerabilities_details() -> List[Dict[str, Any]]:
             "packageName": "django",
             "packageVersion": "1.2",
             "link": "https://nvd.nist.gov/vuln/detail/CVE-2019-19844",
-            "riskFactors": [
-                "Attack complexity: low",
-                "Attack vector: network",
-                "Critical severity",
-                "Has fix",
-            ],
+            "riskFactorsV2": {
+                "Attack complexity": "low",
+                "Attack vector": "network",
+            },
             "impactedVersions": ["<1.11.27"],
             "publishedDate": "2019-12-18T20:15:00+01:00",
             "discoveredDate": "2019-12-18T19:15:00Z",
@@ -1319,13 +1532,99 @@ def get_vulnerabilities_details() -> List[Dict[str, Any]]:
             "packageName": "django",
             "packageVersion": "1.2",
             "link": "https://nvd.nist.gov/vuln/detail/CVE-2016-6186",
-            "riskFactors": [
-                "Attack complexity: low",
-                "Attack vector: network",
-                "Exploit exists",
-                "Has fix",
-                "Medium severity",
-            ],
+            "riskFactorsV2": {
+                "Attack complexity": "low",
+                "Attack vector": "network",
+            },
+            "impactedVersions": ["<=1.8.13"],
+            "publishedDate": "2016-08-05T17:59:00+02:00",
+            "discoveredDate": "2016-08-05T15:59:00Z",
+            "fixDate": "2016-08-05T17:59:00+02:00",
+        },
+    ]
+
+
+def get_vulnerabilities_details_is_used_packages() -> List[Dict[str, Any]]:
+    return [
+        {
+            "id": "CVE-FAKE-111",
+            "status": "fixed in 3.0.1, 2.2.9, 1.11.27",
+            "cvss": 9.8,
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+            "description": "Django before 1.11.27, 2.x before 2.2.9, and 3.x before 3.0.1 allows account takeover. ...",
+            "severity": "critical",
+            "packageName": "package1",
+            "packageVersion": "1.1.1",
+            "link": "https://nvd.nist.gov/vuln/detail/CVE-2019-19844",
+            "riskFactorsV2": {
+                "Attack complexity": "low",
+                "Attack vector": "network",
+                "IsUsed": False,
+                "ReachableFunction": False,
+            },
+            "impactedVersions": ["<1.11.27"],
+            "publishedDate": "2019-12-18T20:15:00+01:00",
+            "discoveredDate": "2019-12-18T19:15:00Z",
+            "fixDate": "2019-12-18T20:15:00+01:00",
+        },
+        {
+            "id": "CVE-FAKE-222",
+            "status": "fixed in 1.9.8, 1.8.14",
+            "cvss": 6.1,
+            "vector": "CVSS:3.0/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+            "description": "Cross-site scripting (XSS) vulnerability in the dismissChangeRelatedObjectPopup function ...",
+            "severity": "medium",
+            "packageName": "package2",
+            "packageVersion": "2.2.2",
+            "link": "https://nvd.nist.gov/vuln/detail/CVE-2016-6186",
+            "riskFactorsV2": {
+                "Attack complexity": "low",
+                "Attack vector": "network",
+                "IsUsed": True,
+                "ReachableFunction": False,
+            },
+            "impactedVersions": ["<=1.8.13"],
+            "publishedDate": "2016-08-05T17:59:00+02:00",
+            "discoveredDate": "2016-08-05T15:59:00Z",
+            "fixDate": "2016-08-05T17:59:00+02:00",
+        },
+        {
+            "id": "CVE-FAKE-333",
+            "status": "fixed in 1.9.8, 1.8.14",
+            "cvss": 6.1,
+            "vector": "CVSS:3.0/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+            "description": "Cross-site scripting (XSS) vulnerability in the dismissChangeRelatedObjectPopup function ...",
+            "severity": "medium",
+            "packageName": "package3",
+            "packageVersion": "3.3.3",
+            "link": "https://nvd.nist.gov/vuln/detail/CVE-2016-6186",
+            "riskFactorsV2": {
+                "Attack complexity": "low",
+                "Attack vector": "network",
+                "IsUsed": True,
+                "ReachableFunction": True,
+            },
+            "impactedVersions": ["<=1.8.13"],
+            "publishedDate": "2016-08-05T17:59:00+02:00",
+            "discoveredDate": "2016-08-05T15:59:00Z",
+            "fixDate": "2016-08-05T17:59:00+02:00",
+        },
+        {
+            "id": "CVE-FAKE-444",
+            "status": "fixed in 1.9.8, 1.8.14",
+            "cvss": 6.1,
+            "vector": "CVSS:3.0/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+            "description": "Cross-site scripting (XSS) vulnerability in the dismissChangeRelatedObjectPopup function ...",
+            "severity": "medium",
+            "packageName": "package4",
+            "packageVersion": "4.4.4",
+            "link": "https://nvd.nist.gov/vuln/detail/CVE-2016-6186",
+            "riskFactorsV2": {
+                "Attack complexity": "low",
+                "Attack vector": "network",
+                "IsUsed": False,
+                "ReachableFunction": True,
+            },
             "impactedVersions": ["<=1.8.13"],
             "publishedDate": "2016-08-05T17:59:00+02:00",
             "discoveredDate": "2016-08-05T15:59:00Z",
@@ -1338,17 +1637,161 @@ def get_vulnerabilities_details_no_deps() -> List[Dict[str, Any]]:
     return [{'cveId': 'PRISMA-2021-0013', 'status': 'fixed in 1.1.1', 'severity': 'medium', 'packageName': 'marked',
              'packageVersion': '0.3.9', 'link': None, 'cvss': None, 'vector': None,
              'description': 'marked package prior to 1.1.1 are vulnerable to  Regular Expression Denial of Service (ReDoS). The regex within src/rules.js file have multiple unused capture groups which could lead to a denial of service attack if user input is reachable.  Origin: https://github.com/markedjs/marked/commit/bd4f8c464befad2b304d51e33e89e567326e62e0',
-             'riskFactors': ['DoS', 'Has fix', 'Medium severity'], 'publishedDate': '2021-01-14T10:29:35Z'},
+             'riskFactorsV2': {'Attack complexity': 'low', 'Attack vector': 'network'}, 'publishedDate': '2021-01-14T10:29:35Z'},
             {'cveId': 'CVE-2022-21681', 'status': 'fixed in 4.0.10', 'severity': 'high', 'packageName': 'marked',
              'packageVersion': '0.3.9', 'link': 'https://github.com/advisories/GHSA-5v2h-r2cx-5xgj', 'cvss': 7.5,
              'vector': 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H',
              'description': 'Marked is a markdown parser and compiler. Prior to version 4.0.10, the regular expression `inline.reflinkSearch` may cause catastrophic backtracking against some strings and lead to a denial of service (DoS). Anyone who runs untrusted markdown through a vulnerable version of marked and does not use a worker with a time limit may be affected. This issue is patched in version 4.0.10. As a workaround, avoid running untrusted markdown through marked or run marked on a worker thread and set a reasonable time limit to prevent draining resources.',
-             'riskFactors': ['DoS', 'Has fix', 'High severity', 'Recent vulnerability', 'Attack complexity: low',
-                             'Attack vector: network'], 'publishedDate': '2022-01-14T17:15:00Z'},
+             'riskFactorsV2': {'Attack complexity': 'low', 'Attack vector': 'network'}, 'publishedDate': '2022-01-14T17:15:00Z'},
             {'cveId': 'CVE-2022-21680', 'status': 'fixed in 4.0.10', 'severity': 'high', 'packageName': 'marked',
              'packageVersion': '0.3.9', 'link': 'https://github.com/advisories/GHSA-rrrm-qjm4-v8hf', 'cvss': 7.5,
              'vector': 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H',
              'description': 'Marked is a markdown parser and compiler. Prior to version 4.0.10, the regular expression `block.def` may cause catastrophic backtracking against some strings and lead to a regular expression denial of service (ReDoS). Anyone who runs untrusted markdown through a vulnerable version of marked and does not use a worker with a time limit may be affected. This issue is patched in version 4.0.10. As a workaround, avoid running untrusted markdown through marked or run marked on a worker thread and set a reasonable time limit to prevent draining resources.',
-             'riskFactors': ['Has fix', 'High severity', 'Recent vulnerability', 'Attack complexity: low',
-                             'Attack vector: network', 'DoS'], 'publishedDate': '2022-01-14T17:15:00Z'}
+             'riskFactorsV2': {'Attack complexity': 'low', 'Attack vector': 'network'}, 'publishedDate': '2022-01-14T17:15:00Z'}
             ]
+
+
+def get_vulnerabilities_details_no_deps_is_used_packages() -> List[Dict[str, Any]]:
+    return [{'cveId': 'PRISMA-2021-0013', 'status': 'fixed in 1.1.1', 'severity': 'medium', 'packageName': 'marked',
+             'packageVersion': '0.3.9', 'link': None, 'cvss': None, 'vector': None,
+             'description': 'marked package prior to 1.1.1 are vulnerable to  Regular Expression Denial of Service (ReDoS). The regex within src/rules.js file have multiple unused capture groups which could lead to a denial of service attack if user input is reachable.  Origin: https://github.com/markedjs/marked/commit/bd4f8c464befad2b304d51e33e89e567326e62e0',
+             'riskFactorsV2': {'Attack complexity': 'low', 'Attack vector': 'network', 'IsUsed': 'True'}, 'publishedDate': '2021-01-14T10:29:35Z'},
+            {'cveId': 'CVE-2022-21681', 'status': 'fixed in 4.0.10', 'severity': 'high', 'packageName': 'marked',
+             'packageVersion': '0.3.9', 'link': 'https://github.com/advisories/GHSA-5v2h-r2cx-5xgj', 'cvss': 7.5,
+             'vector': 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H',
+             'description': 'Marked is a markdown parser and compiler. Prior to version 4.0.10, the regular expression `inline.reflinkSearch` may cause catastrophic backtracking against some strings and lead to a denial of service (DoS). Anyone who runs untrusted markdown through a vulnerable version of marked and does not use a worker with a time limit may be affected. This issue is patched in version 4.0.10. As a workaround, avoid running untrusted markdown through marked or run marked on a worker thread and set a reasonable time limit to prevent draining resources.',
+             'riskFactorsV2': {'Attack complexity': 'low', 'Attack vector': 'network', 'IsUsed': 'True'}, 'publishedDate': '2022-01-14T17:15:00Z'},
+            {'cveId': 'CVE-2022-21680', 'status': 'fixed in 4.0.10', 'severity': 'high', 'packageName': 'marked',
+             'packageVersion': '0.3.9', 'link': 'https://github.com/advisories/GHSA-rrrm-qjm4-v8hf', 'cvss': 7.5,
+             'vector': 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H',
+             'description': 'Marked is a markdown parser and compiler. Prior to version 4.0.10, the regular expression `block.def` may cause catastrophic backtracking against some strings and lead to a regular expression denial of service (ReDoS). Anyone who runs untrusted markdown through a vulnerable version of marked and does not use a worker with a time limit may be affected. This issue is patched in version 4.0.10. As a workaround, avoid running untrusted markdown through marked or run marked on a worker thread and set a reasonable time limit to prevent draining resources.',
+             'riskFactorsV2': {'Attack complexity': 'low', 'Attack vector': 'network'}, 'publishedDate': '2022-01-14T17:15:00Z'}
+            ]
+
+
+def create_cli_license_violations_table_wrapper(with_line_numbers: bool) -> str:
+    file_path = "/requirements.txt"
+
+    package_licenses_details_map = {
+        "django@1.2": [
+            {
+                "package_name": "django",
+                "package_version": "1.2",
+                "license": "DUMMY_LICENSE",
+                "status": "OPEN",
+                "policy": "BC_LIC_1",
+                "lines": [1, 2] if with_line_numbers else [0, 0]
+            },
+            {
+                "package_name": "django",
+                "package_version": "1.2",
+                "license": "DUMMY_LICENSE2",
+                "status": "OPEN",
+                "policy": "BC_LIC_1",
+                "lines": [1, 2] if with_line_numbers else [0, 0]
+            },
+        ],
+        "django@1.12": [
+            {
+                "package_name": "django",
+                "package_version": "1.12",
+                "license": "DUMMY_LICENSE3",
+                "status": "OPEN",
+                "policy": "BC_LIC_1",
+                "lines": [0, 0]
+            },
+        ],
+        "flask@0.6": [
+            {
+                "package_name": "flask",
+                "package_version": "0.6",
+                "license": "DUMMY_LICENSE3",
+                "status": "OPEN",
+                "policy": "BC_LIC_1",
+                "lines": [5, 6] if with_line_numbers else [0, 0]
+            },
+        ]
+    }
+
+    return create_cli_license_violations_table(
+        file_path=file_path,
+        package_licenses_details_map=package_licenses_details_map,
+        lines_details_found=with_line_numbers
+    )
+
+
+def create_cli_output_wrapper(with_line_numbers: bool) -> str:
+    # given
+    rootless_file_path = "requirements.txt"
+    file_abs_path = "/path/to/requirements.txt"
+    check_class = "checkov.sca_package.scanner.Scanner"
+    packages = {
+        get_package_alias("django", "1.2"): {
+            'package_registry': "https://registry.npmjs.org/",
+            'is_private_registry': False,
+            'lines': [1, 2] if with_line_numbers else [0, 0]
+        },
+        get_package_alias("flask", "0.6"): {
+            'package_registry': "https://registry.npmjs.org/",
+            'is_private_registry': False,
+            'lines': [5, 6] if with_line_numbers else [0, 0]
+        }
+    }
+    dummy_package = {'package_registry': "https://registry.npmjs.org/", 'is_private_registry': False}
+    license_statuses = [
+        {
+            "package_name": "django",
+            "package_version": "1.2",
+            "license": "DUMMY_LICENSE",
+            "status": "OPEN",
+            "policy": "BC_LIC_1",
+        },
+        {
+            "package_name": "django",
+            "package_version": "1.2",
+            "license": "DUMMY_LICENSE2",
+            "status": "OPEN",
+            "policy": "BC_LIC_1",
+        },
+        {
+            "package_name": "django",
+            "package_version": "1.12",
+            "license": "DUMMY_LICENSE_3",
+            "status": "OPEN",
+            "policy": "BC_LIC_2"
+        },
+        {
+            "package_name": "flask",
+            "package_version": "0.6",
+            "license": "DUMMY_OTHER_LICENSE",
+            "status": "OPEN",
+            "policy": "BC_LIC_1",
+        }
+    ]
+    # when
+    cves_records = [
+        create_report_cve_record(
+            rootless_file_path=rootless_file_path,
+            file_abs_path=file_abs_path,
+            check_class=check_class,
+            vulnerability_details=details,
+            licenses='Unknown',
+            package=packages.get(get_package_alias(details["packageName"], details["packageVersion"]), dummy_package),
+            root_package={'name': "django", 'version': "1.2", 'lines': [1, 2] if with_line_numbers else [0, 0]},
+            used_private_registry=False
+        )
+        for details in get_vulnerabilities_details()
+    ]
+    license_records = [
+        create_report_license_record(
+            rootless_file_path=rootless_file_path,
+            file_abs_path=file_abs_path,
+            check_class=check_class,
+            licenses_status=license_status,
+            package=packages.get(get_package_alias(license_status["package_name"], license_status["package_version"]),
+                                 dummy_package),
+        )
+        for license_status in license_statuses
+    ]
+    cli_output: str = create_cli_output(True, cves_records + license_records)
+    return cli_output

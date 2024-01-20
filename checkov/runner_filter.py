@@ -4,17 +4,23 @@ import logging
 import fnmatch
 from collections import defaultdict
 from collections.abc import Iterable
-from typing import Any, Set, Optional, Union, List, TYPE_CHECKING, Dict, DefaultDict
+from typing import Any, Set, Optional, Union, List, TYPE_CHECKING, Dict, DefaultDict, cast
 import re
 
-from checkov.common.bridgecrew.code_categories import CodeCategoryMapping, CodeCategoryConfiguration
+from checkov.common.bridgecrew.check_type import CheckType
+from checkov.common.secrets.consts import ValidationStatus
+
+from checkov.common.bridgecrew.code_categories import CodeCategoryMapping, CodeCategoryConfiguration, CodeCategoryType
 from checkov.common.bridgecrew.severities import Severity, Severities
+from checkov.common.sast.consts import SastLanguages
 from checkov.common.util.consts import DEFAULT_EXTERNAL_MODULES_DIR
 from checkov.common.util.type_forcers import convert_csv_string_arg_to_list
+from checkov.common.util.str_utils import convert_to_seconds
 
 if TYPE_CHECKING:
     from checkov.common.checks.base_check import BaseCheck
     from checkov.common.graph.checks_infra.base_check import BaseGraphCheck
+    from checkov.sast.checks_infra.base_check import BaseSastCheck
 
 
 class RunnerFilter(object):
@@ -46,22 +52,32 @@ class RunnerFilter(object):
             block_list_secret_scan: Optional[List[str]] = None,
             deep_analysis: bool = False,
             repo_root_for_plan_enrichment: Optional[List[str]] = None,
-            resource_attr_to_omit: Optional[Dict[str, Set[str]]] = None
+            resource_attr_to_omit: Optional[Dict[str, Set[str]]] = None,
+            enable_git_history_secret_scan: bool = False,
+            git_history_timeout: str = '12h',
+            git_history_last_commit_scanned: Optional[str] = None,  # currently not exposed by a CLI flag
+            report_sast_imports: bool = False,
+            remove_default_sast_policies: bool = False,
+            report_sast_reachability: bool = False
     ) -> None:
 
         checks = convert_csv_string_arg_to_list(checks)
         skip_checks = convert_csv_string_arg_to_list(skip_checks)
 
+        self.skip_invalid_secrets = skip_checks and any(skip_check.capitalize() == ValidationStatus.INVALID.value
+                                                        for skip_check in skip_checks)
+
         self.use_enforcement_rules = use_enforcement_rules
-        self.enforcement_rule_configs: Optional[Dict[str, Severity]] = None
+        self.enforcement_rule_configs: Dict[str, Severity | Dict[CodeCategoryType, Severity]] = {}
 
         # we will store the lowest value severity we find in checks, and the highest value we find in skip-checks
         # so the logic is "run all checks >= severity" and/or "skip all checks <= severity"
         self.check_threshold = None
         self.skip_check_threshold = None
         self.checks = []
+        self.bc_cloned_checks: dict[str, list[dict[str, Any]]] = defaultdict(list)
         self.skip_checks = []
-        self.skip_checks_regex_patterns = defaultdict(lambda: [])
+        self.skip_checks_regex_patterns = defaultdict(list)
         self.show_progress_bar = show_progress_bar
 
         # split out check/skip thresholds so we can access them easily later
@@ -121,10 +137,30 @@ class RunnerFilter(object):
         self.resource_attr_to_omit: DefaultDict[str, Set[str]] = RunnerFilter._load_resource_attr_to_omit(
             resource_attr_to_omit
         )
+        self.sast_languages: Set[SastLanguages] = RunnerFilter.get_sast_languages(framework, skip_framework)
+        if self.sast_languages and any(item for item in self.framework if item.startswith(CheckType.SAST) or item == 'all'):
+            self.framework = [item for item in self.framework if not item.startswith(CheckType.SAST)]
+            self.framework.append(CheckType.SAST)
+        elif not self.sast_languages:
+            # remove all SAST and CDK frameworks
+            self.framework = [
+                item for item in self.framework if not item.startswith(CheckType.SAST) and item != CheckType.CDK
+            ]
+
+        self.enable_git_history_secret_scan: bool = enable_git_history_secret_scan
+        if self.enable_git_history_secret_scan:
+            self.git_history_timeout = convert_to_seconds(git_history_timeout)
+            self.framework = [CheckType.SECRETS]
+            logging.debug("Scan secrets history was enabled ignoring other frameworks")
+            self.git_history_last_commit_scanned = git_history_last_commit_scanned
+
+        self.report_sast_imports = report_sast_imports
+        self.remove_default_sast_policies = remove_default_sast_policies
+        self.report_sast_reachability = report_sast_reachability
 
     @staticmethod
     def _load_resource_attr_to_omit(resource_attr_to_omit_input: Optional[Dict[str, Set[str]]]) -> DefaultDict[str, Set[str]]:
-        resource_attributes_to_omit: DefaultDict[str, Set[str]] = defaultdict(lambda: set())
+        resource_attributes_to_omit: DefaultDict[str, Set[str]] = defaultdict(set)
         # In order to create new object (and not a reference to the given one)
         if resource_attr_to_omit_input:
             resource_attributes_to_omit.update(resource_attr_to_omit_input)
@@ -133,14 +169,25 @@ class RunnerFilter(object):
     def apply_enforcement_rules(self, enforcement_rule_configs: Dict[str, CodeCategoryConfiguration]) -> None:
         self.enforcement_rule_configs = {}
         for report_type, code_category in CodeCategoryMapping.items():
-            config = enforcement_rule_configs.get(code_category)
-            if not config:
-                raise Exception(f'Could not find an enforcement rule config for category {code_category} (runner: {report_type})')
-            self.enforcement_rule_configs[report_type] = config.soft_fail_threshold
+            if isinstance(code_category, list):
+                self.enforcement_rule_configs[report_type] = {c: enforcement_rule_configs.get(c).soft_fail_threshold for c in code_category}  # type:ignore[union-attr] # will not be None
+            else:
+                config = enforcement_rule_configs.get(code_category)
+                if not config:
+                    raise Exception(f'Could not find an enforcement rule config for category {code_category} (runner: {report_type})')
+                self.enforcement_rule_configs[report_type] = config.soft_fail_threshold
+
+    def extract_enforcement_rule_threshold(self, check_id: str, report_type: str) -> Severity:
+        if 'sca_' in report_type and '_LIC_' in check_id:
+            return cast("dict[CodeCategoryType, Severity]", self.enforcement_rule_configs[report_type])[CodeCategoryType.LICENSES]
+        elif 'sca_' in report_type:  # vulnerability
+            return cast("dict[CodeCategoryType, Severity]", self.enforcement_rule_configs[report_type])[CodeCategoryType.VULNERABILITIES]
+        else:
+            return cast(Severity, self.enforcement_rule_configs[report_type])
 
     def should_run_check(
             self,
-            check: BaseCheck | BaseGraphCheck | None = None,
+            check: BaseCheck | BaseGraphCheck | BaseSastCheck | None = None,
             check_id: str | None = None,
             bc_check_id: str | None = None,
             severity: Severity | None = None,
@@ -155,10 +202,13 @@ class RunnerFilter(object):
 
         assert check_id is not None  # nosec (for mypy (and then for bandit))
 
+        check_threshold: Optional[Severity]
+        skip_check_threshold: Optional[Severity]
+
         # apply enforcement rules if specified, but let --check/--skip-check with a severity take priority
         if self.use_enforcement_rules and report_type:
             if not self.check_threshold and not self.skip_check_threshold:
-                check_threshold = self.enforcement_rule_configs[report_type]  # type:ignore[index] # mypy thinks it might be null
+                check_threshold = self.extract_enforcement_rule_threshold(check_id, report_type)
                 skip_check_threshold = None
             else:
                 check_threshold = self.check_threshold
@@ -202,7 +252,7 @@ class RunnerFilter(object):
             explicit_skip or
             regex_match or
             (not bc_check_id and not self.include_all_checkov_policies and not is_external and not explicit_run) or
-            check_id in self.suppressed_policies
+            (bc_check_id in self.suppressed_policies and bc_check_id not in self.bc_cloned_checks)
         )
         logging.debug(f'skip_severity = {skip_severity}, explicit_skip = {explicit_skip}, regex_match = {regex_match}, suppressed_policies: {self.suppressed_policies}')
         logging.debug(
@@ -210,7 +260,7 @@ class RunnerFilter(object):
 
         if should_skip_check:
             result = False
-            logging.debug(f'should_skip_check {check_id}: {result}')
+            logging.debug(f'should_skip_check {check_id}: {should_skip_check}')
         elif should_run_check:
             result = True
             logging.debug(f'should_run_check {check_id}: {result}')
@@ -261,6 +311,10 @@ class RunnerFilter(object):
         above_min = (not self.check_threshold) or self.check_threshold.level <= severity.level
         below_max = self.skip_check_threshold and self.skip_check_threshold.level >= severity.level
         return above_min and not below_max
+
+    @staticmethod
+    def secret_validation_status_matches(secret_validation_status: str, statuses_list: list[str]) -> bool:
+        return secret_validation_status in statuses_list
 
     @staticmethod
     def notify_external_check(check_id: str) -> None:
@@ -328,3 +382,23 @@ class RunnerFilter(object):
     def set_suppressed_policies(self, policy_level_suppressions: List[str]) -> None:
         logging.debug(f"Received the following policy-level suppressions, that will be skipped from running: {policy_level_suppressions}")
         self.suppressed_policies = policy_level_suppressions
+
+    @staticmethod
+    def get_sast_languages(frameworks: Optional[List[str]], skip_framework: Optional[List[str]]) -> Set[SastLanguages]:
+        langs: Set[SastLanguages] = set()
+        if not frameworks or (skip_framework and "sast" in skip_framework):
+            return langs
+        if 'all' in frameworks:
+            sast_languages = SastLanguages.set()
+            skip_framework = [] if not skip_framework else [f.split("sast_")[-1] for f in skip_framework]
+            return set([lang for lang in sast_languages if lang.value not in skip_framework])
+        for framework in frameworks:
+            if framework in [CheckType.SAST, CheckType.CDK]:
+                for sast_lang in SastLanguages:
+                    langs.add(sast_lang)
+                return langs
+            if not framework.startswith(CheckType.SAST):
+                continue
+            lang = '_'.join(framework.split('_')[1:])
+            langs.add(SastLanguages[lang.upper()])
+        return langs

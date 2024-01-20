@@ -1,9 +1,14 @@
 import os
+
+from parameterized import parameterized_class
+
+from tests.graph_utils.utils import PARAMETERIZED_GRAPH_FRAMEWORKS
 from tests.terraform.graph.checks_infra.test_base import TestBaseSolver
 
 TEST_DIRNAME = os.path.dirname(os.path.realpath(__file__))
 
 
+@parameterized_class(PARAMETERIZED_GRAPH_FRAMEWORKS)
 class TestNotWithinSolver(TestBaseSolver):
     def setUp(self) -> None:
         self.checks_dir = TEST_DIRNAME
